@@ -1,0 +1,8 @@
+# Bazel build outputs
+bazel-*
+
+# IntelliJ
+.idea
+.bazelproject
+.ijwb/
+.aswb/

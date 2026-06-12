@@ -1,0 +1,4 @@
+.devkit
+third_party/shared
+third_party/tca-sdk
+.home

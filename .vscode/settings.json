@@ -1,0 +1,12 @@
+{
+  "rust-analyzer.check.overrideCommand": [
+    "${workspaceFolder}/.vscode/rust-analyzer.sh",
+    "$saved_file",
+    "${workspaceFolder}",
+    "/tmp/bazel-rust-analyzer-node"
+  ],
+  "coverage-gutters.coverageFileNames": ["bazel-out/_coverage/_coverage_report.dat"],
+  "gitblame.commitUrl": "https://github.com/private-compute-infra-toolkit/attestation-verification-service/commit/${hash}",
+  "rust-analyzer.linkedProjects": ["rust-project.json"],
+  "rust-analyzer.diagnostics.disabled": ["macro-error"]
+}

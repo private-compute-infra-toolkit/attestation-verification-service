@@ -1,0 +1,77 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package google.tca.policy.v1;
+
+import "google/protobuf/duration.proto";
+import "proto/attestation/reference_value.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "TcaPolicyProto";
+option java_package = "com.google.tca.policy.v1";
+
+message Policies {
+  //  key = `publisher_id/workload_id`
+  map<string, Policy> policies = 1;
+  string issuer = 2;
+  string subject = 3;
+}
+
+message Policy {
+  string publisher_id = 1;
+  string workload_id = 2;
+  string trust_domain = 3;
+  string operator = 4;
+  repeated ReferenceValues reference_values = 5;
+  X509CertificateAttributes certificate_attributes = 6;
+}
+
+message ReferenceValues {
+  oneof values {
+    oak.attestation.v1.ReferenceValues oak_reference_values = 1;
+  }
+}
+
+message X509CertificateAttributes {
+  google.protobuf.Duration max_certificate_validity = 1;
+  X509Extensions x509_extensions = 2;
+}
+
+message X509Extensions {
+  BasicConstraints basic_constraints = 1;
+  NameConstraints name_constraints = 2;
+}
+
+// Basic Constraints (OID: 2.5.29.19)
+message BasicConstraints {
+  oneof constraint {
+    CaCertificate ca_certificate = 1;
+    LeafCertificate leaf_certificate = 2;
+  }
+}
+
+// For workloads like AVS, which also work as intermediate CA
+message CaCertificate {
+  int32 path_len_constraint = 1;
+}
+
+// for probers, test workloads, etc
+message LeafCertificate {}
+
+// Name Constraints (OID: 2.5.29.30)
+message NameConstraints {
+  repeated string permitted_subtree = 1;
+}

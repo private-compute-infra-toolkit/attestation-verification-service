@@ -1,0 +1,9 @@
+# Policy used to verify C2SP inclusion proofs.
+# Formal spec is to be defined per https://github.com/C2SP/C2SP/issues/226.
+
+log paic.google.com/log/0+609b8245+Ae74NkuIVBowBYu37xUJ5e3wf52bMPhW9e59idWfWR2j
+log paic.google.com/log/1+4c1d98f3+ATtAPhpoER4pucyYdjINViavBdOHZAubPCz9xlqnw7Oy
+
+witness tf staging.witness.transparency.goog/ring-any-bells+2e1a8dc9+BG5JTpLc3FJtwzgh1Uv+Qelz9qeOH2bfWjS1s0s+y4rL
+
+quorum tf

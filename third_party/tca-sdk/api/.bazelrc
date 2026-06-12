@@ -1,0 +1,9 @@
+try-import %workspace%/google-internal/.bazelrc
+
+# Enforce a consistent Java version for all Bazel commands.
+build --java_language_version=17
+build --java_runtime_version=remotejdk_17
+test --java_language_version=17
+test --java_runtime_version=remotejdk_17
+run --java_language_version=17
+run --java_runtime_version=remotejdk_17

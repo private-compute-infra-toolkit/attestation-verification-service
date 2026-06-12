@@ -1,0 +1,20 @@
+# bazelrc (applies to all invocations of bazel or bazelisk)
+build --config=clippy
+
+# Don't try to find a C++ compiler on the local machine.
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+# Use nightly rustc by default
+common --@rules_rust//rust/toolchain/channel=nightly
+
+build --incompatible_strict_action_env
+build --strip=always
+build -c opt
+
+try-import %workspace%/google_internal/.bazelrc
+
+build:run_all_tests --cache_test_results=no
+
+build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:clippy --output_groups=+clippy_checks
+
+coverage --cache_test_results=no

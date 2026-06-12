@@ -1,0 +1,133 @@
+//
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
+syntax = "proto3";
+
+import "proto/attestation/evidence.proto";
+import "proto/attestation/endorsement.proto";
+
+package attestation_verification;
+
+// Attestation Verification Service (AVS) acts as an intermediate certificate
+// authority for workloads. A workload may present its attestation in exchange
+// for a certificate upon successful validation of the attestation against a set
+// of public policies. Any caller of the service should ensure that AVS itself
+// is verified prior to establishing trust in any of its verification results.
+service AttestationVerification {
+  // Checks whether a provided attestation abides by a set of public policies.
+  rpc CertifyAttestation(CertifyAttestationRequest)
+      returns (CertifyAttestationResponse);
+
+  // Interactive version of CertifyAttestation.
+  rpc CertifyAttestationStream(stream CertifyAttestationStreamRequest)
+      returns (stream CertifyAttestationStreamResponse);
+
+  // Generates a new AVS signing key pair and applies for a new certificate from
+  // TCA (Trusted Certificate Authority). Upon success, the newly generated
+  // signing key pair is immediately used henceforth to sign `CertifyAttestation`
+  // results. The provisioned certificate from TCA will also be included in the
+  // certification results.
+  rpc GenerateAvsSigningKey(GenerateAvsSigningKeyRequest) returns
+      (GenerateAvsSigningKeyResponse);
+}
+
+// The identity of the entity managing the infrastructure where a workload is
+// running.
+message OperatorInfo {
+  // Globally unique identifier for the service provider operating the node.
+  string operator_domain = 1;
+  // The specific role or persona of the operator's node (e.g., 'billing',
+  // 'encrypted-zone'). This role is used by AVS to determine the set of
+  // applicable policies (such as ratified isolates) and is included as a
+  // path segment in the resulting SPIFFE ID. If left blank the issued
+  // operator_role will be `none`.
+  string operator_role = 2;
+}
+
+// List of policies AVS can employ on the artifacts to certify a workload.
+// Each policy hint entry is associated with a different role. Roles are placed
+// in the SAN extension of the resulting certificate.
+enum PolicyHint {
+  POLICY_HINT_UNSPECIFIED = 0;
+  PRIVATE_ARATEA_FRONTEND_CB_CERTIFICATE = 1;
+  EZ_ENFORCER_CB_CERTIFICATE = 2;
+  EZ_TSM_CB_FRONTEND_CERTIFICATE = 3;
+}
+
+message CertifyAttestationRequest {
+  // Certificate signing request in DER format.
+  bytes csr = 1;
+  oak.attestation.v1.Evidence evidence = 2;
+  oak.attestation.v1.Endorsements endorsements = 3;
+  OperatorInfo operator_info = 4;
+  PolicyHint policy_hint = 5;
+}
+
+message CertifyAttestationResponse {
+  // Ordered array of DER-encoded X.509 certificates.
+  // This follows the standard TLS/RFC chain-building sequence where the
+  // most specific certificate (the leaf) comes first.
+  //
+  // THERE MAY BE MORE THAN 3 CERTIFICATES
+  // +--------------------------------------------------------------------------+
+  // | Index | Certificate Type        | Issued To       | Signed By            |
+  // +-------+-------------------------+-----------------+----------------------+
+  // |  [0]  | Workload Certificate    | Client Workload | AVS Cert             |
+  // |  [1]  | AVS Certificate         | AVS Sub-CA      | TCA (Root CA)        |
+  // |  [2]  | TCA Self-Signed Cert    | TCA Root CA     | TCA Root CA (Self)   |
+  // +-------+-------------------------+-----------------+----------------------+
+  repeated bytes certificate_chain = 1;
+}
+
+message CertifyAttestationStreamRequest {
+  oneof request {
+    ChallengeRequest challenge_request = 1;
+    CertifyAttestationRequest certify_request = 2;
+  }
+}
+
+message CertifyAttestationStreamResponse {
+  oneof response {
+    ChallengeResponse challenge_response = 1;
+    CertifyAttestationResponse certify_response = 2;
+  }
+}
+
+message ChallengeRequest {}
+
+message ChallengeResponse {
+  bytes nonce = 1;
+}
+
+message GenerateAvsSigningKeyRequest {}
+
+// A new signed key certificate will be returned upon a successful update of the
+// AVS signing key pair.
+message GenerateAvsSigningKeyResponse {
+  // Updated chain of X.509 certificates (in DER format) for the new AVS signing
+  // key pair from TCA. The first certificate is AVS' new provisioned certificate
+  // from TCA that it will leverage for all subsequent `CertifyAttestation` requests.
+  // The final certificate is TCA's self-signed certificate.
+  //
+  // THERE MAY BE MORE THAN 2 CERTIFICATES
+  // +--------------------------------------------------------------------------+
+  // | Index | Certificate Type        | Issued To       | Signed By            |
+  // +-------+-------------------------+-----------------+----------------------+
+  // |  [0]  | AVS Certificate         | AVS Sub-CA      | TCA (Root CA)        |
+  // |  [1]  | TCA Self-Signed Cert    | TCA Root CA     | TCA Root CA (Self)   |
+  // +-------+-------------------------+-----------------+----------------------+
+  repeated bytes new_certificate_chain = 1;
+}

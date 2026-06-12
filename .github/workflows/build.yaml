@@ -1,0 +1,65 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Build'
+permissions:
+  contents: 'write'
+  id-token: 'write'
+  attestations: 'write'
+  artifact-metadata: 'write'
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: 'ubuntu-latest-8-cores'
+    timeout-minutes: 60
+
+    steps:
+      - uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # v6.0.2
+
+      - name: 'Set git identity'
+        uses: './.devkit/.github/actions/set-git-identity'
+
+      - name: 'Run build'
+        run: |
+          devkit/build bazel build //...
+          devkit/check_checksums
+          mkdir -p artifacts
+          devkit/build bazel run //:build_copy
+
+      - name: 'Generate artifact attestation'
+        id: 'attest'
+        uses: 'actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26' # v4.1.0
+        with:
+          subject-path: 'artifacts/'
+
+      - name: 'Upload build artifacts'
+        uses: 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' # v7.0.1
+        with:
+          name: 'avs_enclave_app'
+          path: 'artifacts/'
+
+      - name: 'Push artifacts and attestations to release'
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" artifacts/* "${{ steps.attest.outputs.bundle-path }}" --clobber
+
+      - name: 'Upload devkit logs'
+        if: 'always()'
+        uses: './.devkit/.github/actions/upload-devkit-logs'

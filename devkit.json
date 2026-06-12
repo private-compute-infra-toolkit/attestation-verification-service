@@ -1,0 +1,10 @@
+{
+  "docker": {
+    "registry": {
+        "host": "",
+        "project": "",
+        "repository": "",
+        "namespace": "private-compute-infra-toolkit/attestation-verification-service"
+    }
+  }
+}
