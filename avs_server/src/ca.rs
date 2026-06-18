@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // TODO: b/509861057 - Refactor unsafe Rust logic
-use crate::csr::ProvisionedIdentity;
+use crate::csr::{ConnectionMode, ProvisionedIdentity};
 use log::info;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -76,7 +76,7 @@ impl CertificateAuthority {
                 Ok(chain) => chain,
                 Err(e) => {
                     unsafe { bssl_sys::X509_NAME_free(issuer_name.as_ptr()) };
-                    return Err(anyhow::anyhow!("TCA Error: {:?}", e));
+                    return Err(anyhow::Error::new(e));
                 }
             };
 
@@ -178,7 +178,7 @@ impl CertificateAuthority {
                 anyhow::bail!("Failed to set public key");
             }
 
-            let ext = match self.create_spiffe_extension(identity) {
+            let ext = match self.create_san_extension(identity) {
                 Ok(ext) => ext,
                 Err(e) => {
                     bssl_sys::X509_free(x509);
@@ -196,7 +196,7 @@ impl CertificateAuthority {
             }
             bssl_sys::X509_EXTENSION_free(ext);
 
-            if let Err(e) = Self::set_x509_extended_key_usage(x509) {
+            if let Err(e) = Self::set_x509_extended_key_usage(x509, &identity.connection_mode) {
                 bssl_sys::X509_free(x509);
                 return Err(e);
             }
@@ -576,6 +576,18 @@ impl CertificateAuthority {
         Ok(trust_domain.to_string())
     }
 
+    /// Dispatches SAN extension creation based on the connection mode.
+    /// TLS mode uses a DNS SAN; all other modes use a SPIFFE URI SAN.
+    fn create_san_extension(
+        &self,
+        identity: &ProvisionedIdentity,
+    ) -> anyhow::Result<*mut bssl_sys::X509_EXTENSION> {
+        match identity.connection_mode {
+            ConnectionMode::Tls => self.create_dns_extension(identity),
+            _ => self.create_spiffe_extension(identity),
+        }
+    }
+
     fn create_spiffe_extension(
         &self,
         identity: &ProvisionedIdentity,
@@ -604,11 +616,40 @@ impl CertificateAuthority {
         Ok(ext)
     }
 
-    // Adds the Extended Key Usage extension with TLS Web Server Authentication
-    // and TLS Web Client Authentication to the certificate.
-    // TODO: b/520452542 - Provide different EKU based on role.
-    fn set_x509_extended_key_usage(x509: *mut bssl_sys::X509) -> anyhow::Result<()> {
-        let eku_value = std::ffi::CString::new("serverAuth,clientAuth")
+    fn create_dns_extension(
+        &self,
+        identity: &ProvisionedIdentity,
+    ) -> anyhow::Result<*mut bssl_sys::X509_EXTENSION> {
+        // Add a DNS name as `subject_alt_name` (OID 2.5.29.17) extension
+        // in the format: <operator_role>.<operator_domain>.<trust_domain>.
+        let dns_name = format!(
+            "DNS:{}.{}.{}",
+            identity.operator_role, identity.operator_domain, self.trust_domain,
+        );
+        let ext_value = std::ffi::CString::new(dns_name)
+            .map_err(|_| anyhow::anyhow!("Cannot create DNS SAN string"))?;
+        let ext = unsafe {
+            bssl_sys::X509V3_EXT_nconf_nid(
+                /* conf= */ std::ptr::null_mut(),
+                /* ctx= */ std::ptr::null(),
+                /* ext_nid= */ bssl_sys::NID_subject_alt_name,
+                /* value= */ ext_value.as_ptr(),
+            )
+        };
+        Ok(ext)
+    }
+
+    // Adds the Extended Key Usage extension based on the connection mode.
+    fn set_x509_extended_key_usage(
+        x509: *mut bssl_sys::X509,
+        connection_mode: &ConnectionMode,
+    ) -> anyhow::Result<()> {
+        let eku_str = match connection_mode {
+            ConnectionMode::Unrestricted => return Ok(()),
+            ConnectionMode::Mtls => "serverAuth,clientAuth",
+            ConnectionMode::Tls => "serverAuth",
+        };
+        let eku_value = std::ffi::CString::new(eku_str)
             .map_err(|_| anyhow::anyhow!("Failed to create EKU value string"))?;
         unsafe {
             let ext = bssl_sys::X509V3_EXT_nconf_nid(

@@ -68,8 +68,19 @@ impl AttestationVerification for AttestationVerificationService {
             return Err(Status::failed_precondition("request is missing `endorsements`"));
         };
 
-        let identity = csr::validate_csr_request(req.csr.as_slice(), evidence, endorsements, None)
-            .map_err(|e| Status::new(tonic::Code::FailedPrecondition, format!("{e:?}")))?;
+        let Some(ref operator_info) = req.operator_info else {
+            return Err(Status::failed_precondition("request is missing `operator_info`"));
+        };
+
+        let identity = csr::validate_csr_request(
+            req.csr.as_slice(),
+            evidence,
+            endorsements,
+            None,
+            req.policy_hint,
+            operator_info,
+        )
+        .map_err(|e| Status::new(tonic::Code::FailedPrecondition, format!("{e:?}")))?;
         let cert = certificate_authority.generate_certificate(&identity).map_err(|e| {
             Status::new(tonic::Code::Internal, format!("Failed to generate certificate: {e:?}"))
         })?;
@@ -174,12 +185,22 @@ impl AttestationVerification for AttestationVerificationService {
                     return;
                 }
             };
+            let operator_info = match certify_request.operator_info {
+                Some(o) => o,
+                None => {
+                    let _ =
+                        tx.send(Err(Status::failed_precondition("missing operator_info"))).await;
+                    return;
+                }
+            };
 
             match csr::validate_csr_request(
                 certify_request.csr.as_slice(),
                 &evidence,
                 &endorsements,
                 Some(&nonce),
+                certify_request.policy_hint,
+                &operator_info,
             ) {
                 Ok(identity) => match certificate_authority.generate_certificate(&identity) {
                     Ok(cert) => {
@@ -222,11 +243,7 @@ impl AttestationVerification for AttestationVerificationService {
             // Intermediate certificate (signed by TCA)
             Some(tca_client) => ca::CertificateAuthority::new_intermediate(tca_client.clone())
                 .await
-                .map_err(|e| {
-                    Status::internal(format!(
-                        "Failed to create intermediate certificate authority: {e:?}"
-                    ))
-                })?,
+                .map_err(map_tca_error)?,
             // Self-signed certificate
             None => ca::CertificateAuthority::new_root().map_err(|e| {
                 Status::internal(format!("Failed to create root certificate authority: {e:?}"))
@@ -240,5 +257,16 @@ impl AttestationVerification for AttestationVerificationService {
         *ca_lock = Some(new_ca);
 
         Ok(Response::new(GenerateAvsSigningKeyResponse { new_certificate_chain }))
+    }
+}
+
+fn map_tca_error(e: anyhow::Error) -> Status {
+    if let Some(cert_err) = e.downcast_ref::<tca_common::CertificateError>() {
+        match cert_err {
+            tca_common::CertificateError::Network(msg) => Status::unavailable(msg.clone()),
+            _ => Status::internal(format!("TCA Error: {:?}", cert_err)),
+        }
+    } else {
+        Status::internal(format!("Failed to create intermediate certificate authority: {e:?}"))
     }
 }

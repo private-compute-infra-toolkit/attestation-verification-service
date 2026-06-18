@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use crate::ca::KeyPair;
 use anyhow::Context;
+use avs_proto_rust::avs::{OperatorInfo, PolicyHint};
 use oak_attestation_verification::{
     decode_event_proto, results::get_user_data_payload, AmdSevSnpPolicy,
     AmdSevSnpTransparentDiceAttestationVerifier, FirmwarePolicy, TransparentLayer1Policy,
@@ -37,10 +38,35 @@ use oak_proto_rust::oak::{
 };
 use oak_time_std::clock::SystemTimeClock;
 
+/// Controls which Extended Key Usage extension is set on a provisioned
+/// certificate.
+pub(crate) enum ConnectionMode {
+    /// No EKU extension added.
+    Unrestricted,
+    /// serverAuth + clientAuth (mutual TLS).
+    Mtls,
+    /// serverAuth only (frontend TLS).
+    Tls,
+}
+
+impl From<PolicyHint> for ConnectionMode {
+    fn from(hint: PolicyHint) -> Self {
+        match hint {
+            PolicyHint::Unspecified | PolicyHint::PrivateArateaFrontendCbCertificate => {
+                ConnectionMode::Unrestricted
+            }
+            PolicyHint::EzEnforcerCbCertificate => ConnectionMode::Mtls,
+            PolicyHint::EzTsmCbFrontendCertificate => ConnectionMode::Tls,
+        }
+    }
+}
+
 /// Identity fields derived from attestation verification, used to construct
-/// the SPIFFE ID in the provisioned certificate's SAN extension.
+/// the role. The role may be a SPIFFE ID or a DNS name. The role should always
+/// be placed in the provisioned certificate's SAN extension.
 pub(crate) struct ProvisionedIdentity {
     pub(crate) public_key: KeyPair,
+    pub(crate) connection_mode: ConnectionMode,
     pub(crate) operator_domain: String,
     pub(crate) operator_role: String,
     pub(crate) publisher_domain: String,
@@ -54,6 +80,8 @@ pub(crate) fn validate_csr_request(
     evidence: &Evidence,
     endorsements: &Endorsements,
     nonce: Option<&[u8]>,
+    policy_hint: i32,
+    operator_info: &OperatorInfo,
 ) -> anyhow::Result<ProvisionedIdentity> {
     let csr_public_key = verify_csr_and_get_public_key(csr_der)?;
 
@@ -93,12 +121,28 @@ pub(crate) fn validate_csr_request(
 
     verify_data_binding(&attestation_results, &csr_public_key, nonce)?;
 
+    let connection_mode: ConnectionMode = PolicyHint::try_from(policy_hint)
+        .map_err(|_| anyhow::anyhow!("unrecognized policy_hint value: {}", policy_hint))?
+        .into();
+
+    anyhow::ensure!(
+        !operator_info.operator_domain.is_empty(),
+        "operator_domain must be specified in operator_info"
+    );
+    let operator_domain = operator_info.operator_domain.clone();
+    let operator_role = if operator_info.operator_role.is_empty() {
+        "none".to_string()
+    } else {
+        operator_info.operator_role.clone()
+    };
+
     // TODO: b/515710997 - Populate these fields with real values derived from
     // attestation policy instead of hardcoded stubs.
     Ok(ProvisionedIdentity {
         public_key: csr_public_key,
-        operator_domain: "google".to_string(),
-        operator_role: "encrypted-zone".to_string(),
+        connection_mode,
+        operator_domain,
+        operator_role,
         publisher_domain: "google-release".to_string(),
         publisher_role: "pcit-release-bot".to_string(),
         workload_name: "encrypted-zone".to_string(),

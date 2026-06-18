@@ -1,3 +1,5 @@
+The attestation evidence is rooted in secure and trusted hardware that supports TEEs such as AMD SEV-SNP and Intel TDX.
+
 # Attestation Verification Service (AVS)
 
 [![Pre-Commit Scorecard](https://github.com/private-compute-infra-toolkit/attestation-verification-service/actions/workflows/pre-commit.yaml/badge.svg)](https://github.com/private-compute-infra-toolkit/attestation-verification-service/actions/workflows/pre-commit.yaml)
@@ -5,8 +7,12 @@
 [![Test Scorecard](https://github.com/private-compute-infra-toolkit/attestation-verification-service/actions/workflows/test.yaml/badge.svg)](https://github.com/private-compute-infra-toolkit/attestation-verification-service/actions/workflows/test.yaml)
 [![Coverage Scorecard](https://github.com/private-compute-infra-toolkit/attestation-verification-service/actions/workflows/coverage.yaml/badge.svg)](https://github.com/private-compute-infra-toolkit/attestation-verification-service/actions/workflows/coverage.yaml)
 
-The Attestation Verification Service aims to verify measurements of running
-workloads against a policy that is transparent and auditable.
+The Attestation Verification Service (AVS) is a privacy-enabling infrastructure component that verifies two key properties of workloads running in a Trusted Execution Environment:
+
+1. The hardware-backed attestation evidence provided by the TEE is valid and the integrity of the startup measurements has been cryptographically verified and the attestation evidence is rooted in the TEE's secure hardware.
+2. The software has been endorsed on a transparency ledger. This endorsement is typically created by the owner of the binary.
+
+AVS acts as an intermediate Certificate Authority (CA) and issues an X.509 certificate to workloads that complies with an associated policy. This simplifies authorization for trusted workloads, which can then use standard certificate libraries.
 
 ## Getting started
 

@@ -22,7 +22,7 @@ use avs_proto_rust::avs::{
     attestation_verification_server::AttestationVerificationServer,
     certify_attestation_stream_request, certify_attestation_stream_response,
     CertifyAttestationRequest, CertifyAttestationResponse, CertifyAttestationStreamRequest,
-    ChallengeRequest, GenerateAvsSigningKeyRequest,
+    ChallengeRequest, GenerateAvsSigningKeyRequest, OperatorInfo, PolicyHint,
 };
 use avs_server_lib::server::AttestationVerificationService;
 use chrono::{Duration, Utc};
@@ -150,12 +150,23 @@ fn extract_san_uri(der: &[u8]) -> anyhow::Result<Vec<String>> {
     Ok(result)
 }
 
+fn extract_san_dns(der: &[u8]) -> anyhow::Result<Vec<String>> {
+    let san = x509_cert::ext::pkix::SubjectAltName::from_der(der)?;
+    let mut result = vec![];
+    for name in san.0.iter() {
+        if let x509_cert::ext::pkix::name::GeneralName::DnsName(dns) = name {
+            result.push(dns.as_str().to_string());
+        }
+    }
+    Ok(result)
+}
+
 fn get_spiffe_id(extensions: &Option<Vec<x509_cert::ext::Extension>>) -> anyhow::Result<String> {
-    const SPIFFE_OID: x509_cert::spki::ObjectIdentifier =
+    const SAN_OID: x509_cert::spki::ObjectIdentifier =
         x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.17");
     if let Some(extensions) = extensions {
         for ext in extensions.iter() {
-            if ext.extn_id == SPIFFE_OID {
+            if ext.extn_id == SAN_OID {
                 let uris = extract_san_uri(ext.extn_value.as_bytes())?;
                 if uris.len() != 1 {
                     anyhow::bail!("There are multiple URI fields in subject alt name extension");
@@ -167,10 +178,52 @@ fn get_spiffe_id(extensions: &Option<Vec<x509_cert::ext::Extension>>) -> anyhow:
     anyhow::bail!("SPIFFE ID not found in certificate extensions")
 }
 
+fn get_dns_name(extensions: &Option<Vec<x509_cert::ext::Extension>>) -> anyhow::Result<String> {
+    const SAN_OID: x509_cert::spki::ObjectIdentifier =
+        x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.17");
+    if let Some(extensions) = extensions {
+        for ext in extensions.iter() {
+            if ext.extn_id == SAN_OID {
+                let dns_names = extract_san_dns(ext.extn_value.as_bytes())?;
+                if dns_names.len() != 1 {
+                    anyhow::bail!("Expected exactly 1 DNS name in SAN, found {}", dns_names.len());
+                }
+                // Also verify no URI SANs are present.
+                let uris = extract_san_uri(ext.extn_value.as_bytes())?;
+                if !uris.is_empty() {
+                    anyhow::bail!("Expected no URI SANs when DNS SAN is present, found {:?}", uris);
+                }
+                return Ok(dns_names[0].clone());
+            }
+        }
+    }
+    anyhow::bail!("DNS name not found in certificate extensions")
+}
+
+enum ExpectedSan {
+    SpiffeUri(String),
+    DnsName(String),
+}
+
+fn test_operator_info() -> OperatorInfo {
+    OperatorInfo {
+        operator_domain: "google".to_string(),
+        operator_role: "encrypted-zone".to_string(),
+    }
+}
+
+enum ExpectedEku {
+    None,
+    ServerAuth,
+    #[allow(dead_code)]
+    ServerAndClientAuth,
+}
+
 fn validate_cert_chain(
     certificate_chain: &[Vec<u8>],
     csr_key_pair: &rcgen::KeyPair,
-    expected_trust_domain: &str,
+    expected_san: &ExpectedSan,
+    expected_eku: ExpectedEku,
 ) {
     assert!(!certificate_chain.is_empty(), "Certificate chain must not be empty");
 
@@ -209,32 +262,63 @@ fn validate_cert_chain(
         expected_not_after
     );
 
-    // Validate that the certificate has a SPIFFE ID in SAN as OID 2.5.29.17.
-    let expected_spiffe_id = format!(
-        "spiffe://{}/operator/google/encrypted-zone/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
-        expected_trust_domain
-    );
-    assert_eq!(get_spiffe_id(&tbs.extensions).unwrap(), expected_spiffe_id);
+    // Validate that the certificate SAN matches the expected type and value.
+    match expected_san {
+        ExpectedSan::SpiffeUri(expected_uri) => {
+            assert_eq!(get_spiffe_id(&tbs.extensions).unwrap(), *expected_uri);
+        }
+        ExpectedSan::DnsName(expected_dns) => {
+            assert_eq!(get_dns_name(&tbs.extensions).unwrap(), *expected_dns);
+        }
+    }
 
-    // Validate that the certificate has Extended Key Usage with
-    // serverAuth (1.3.6.1.5.5.7.3.1) and clientAuth (1.3.6.1.5.5.7.3.2).
+    // Validate Extended Key Usage based on the expected connection mode.
     const EKU_OID: x509_cert::spki::ObjectIdentifier =
         x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.37");
-    const SERVER_AUTH_OID: x509_cert::spki::ObjectIdentifier =
-        x509_cert::spki::ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.1");
-    const CLIENT_AUTH_OID: x509_cert::spki::ObjectIdentifier =
-        x509_cert::spki::ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.2");
-    let eku_ext = tbs
-        .extensions
-        .as_ref()
-        .expect("certificate must have extensions")
-        .iter()
-        .find(|ext| ext.extn_id == EKU_OID)
-        .expect("certificate must have Extended Key Usage extension");
-    let eku = x509_cert::ext::pkix::ExtendedKeyUsage::from_der(eku_ext.extn_value.as_bytes())
-        .expect("failed to parse Extended Key Usage extension");
-    assert!(eku.0.contains(&SERVER_AUTH_OID), "EKU must contain serverAuth (1.3.6.1.5.5.7.3.1)");
-    assert!(eku.0.contains(&CLIENT_AUTH_OID), "EKU must contain clientAuth (1.3.6.1.5.5.7.3.2)");
+    let eku_ext =
+        tbs.extensions.as_ref().and_then(|exts| exts.iter().find(|ext| ext.extn_id == EKU_OID));
+
+    match expected_eku {
+        ExpectedEku::None => {
+            assert!(eku_ext.is_none(), "certificate must not have Extended Key Usage extension");
+        }
+        ExpectedEku::ServerAuth => {
+            const SERVER_AUTH_OID: x509_cert::spki::ObjectIdentifier =
+                x509_cert::spki::ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.1");
+            const CLIENT_AUTH_OID: x509_cert::spki::ObjectIdentifier =
+                x509_cert::spki::ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.2");
+            let eku_ext = eku_ext.expect("certificate must have Extended Key Usage extension");
+            let eku =
+                x509_cert::ext::pkix::ExtendedKeyUsage::from_der(eku_ext.extn_value.as_bytes())
+                    .expect("failed to parse Extended Key Usage extension");
+            assert!(
+                eku.0.contains(&SERVER_AUTH_OID),
+                "EKU must contain serverAuth (1.3.6.1.5.5.7.3.1)"
+            );
+            assert!(
+                !eku.0.contains(&CLIENT_AUTH_OID),
+                "EKU must NOT contain clientAuth for TLS-only mode"
+            );
+        }
+        ExpectedEku::ServerAndClientAuth => {
+            const SERVER_AUTH_OID: x509_cert::spki::ObjectIdentifier =
+                x509_cert::spki::ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.1");
+            const CLIENT_AUTH_OID: x509_cert::spki::ObjectIdentifier =
+                x509_cert::spki::ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.2");
+            let eku_ext = eku_ext.expect("certificate must have Extended Key Usage extension");
+            let eku =
+                x509_cert::ext::pkix::ExtendedKeyUsage::from_der(eku_ext.extn_value.as_bytes())
+                    .expect("failed to parse Extended Key Usage extension");
+            assert!(
+                eku.0.contains(&SERVER_AUTH_OID),
+                "EKU must contain serverAuth (1.3.6.1.5.5.7.3.1)"
+            );
+            assert!(
+                eku.0.contains(&CLIENT_AUTH_OID),
+                "EKU must contain clientAuth (1.3.6.1.5.5.7.3.2)"
+            );
+        }
+    }
 
     // Validate that each certificate in the chain is signed by the next.
     for i in 0..certificate_chain.len() - 1 {
@@ -280,6 +364,7 @@ async fn test_valid_certify_attestation() {
             csr: csr_der,
             evidence: Some(evidence),
             endorsements: Some(endorsements),
+            operator_info: Some(test_operator_info()),
             ..Default::default()
         };
 
@@ -295,7 +380,15 @@ async fn test_valid_certify_attestation() {
             expected_chain_len,
             mode
         );
-        validate_cert_chain(&response.certificate_chain, &csr_key_pair, expected_trust_domain);
+        validate_cert_chain(
+            &response.certificate_chain,
+            &csr_key_pair,
+            &ExpectedSan::SpiffeUri(format!(
+                "spiffe://{}/operator/google/encrypted-zone/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
+                expected_trust_domain
+            )),
+            ExpectedEku::None,
+        );
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
     }
@@ -321,6 +414,7 @@ async fn test_invalid_vcek_error() {
             csr: csr_der,
             evidence: Some(get_evidence()),
             endorsements: Some(invalid_endorsements),
+            operator_info: Some(test_operator_info()),
             ..Default::default()
         };
 
@@ -342,6 +436,7 @@ async fn test_invalid_vcek_error() {
             csr: csr_der,
             evidence: Some(get_evidence()),
             endorsements: Some(empty_endorsements),
+            operator_info: Some(test_operator_info()),
             ..Default::default()
         };
 
@@ -430,6 +525,7 @@ async fn test_invalid_csr_error() {
             csr: b"invalid".to_vec(),
             evidence: Some(get_evidence()),
             endorsements: Some(endorsements.clone()),
+            operator_info: Some(test_operator_info()),
             ..Default::default()
         };
 
@@ -444,6 +540,7 @@ async fn test_invalid_csr_error() {
             csr: csr_der[0..csr_der.len() - 3].to_vec(),
             evidence: Some(get_evidence()),
             endorsements: Some(endorsements.clone()),
+            operator_info: Some(test_operator_info()),
             ..Default::default()
         };
 
@@ -487,6 +584,7 @@ async fn test_mismatch_publickey() {
             csr: csr_der,
             evidence: Some(evidence),
             endorsements: Some(endorsements),
+            operator_info: Some(test_operator_info()),
             ..Default::default()
         };
 
@@ -654,7 +752,10 @@ async fn test_generate_avs_signing_key_with_failing_tca_client() {
     let result = client.generate_avs_signing_key(GenerateAvsSigningKeyRequest {}).await;
     match result {
         Ok(_) => panic!("Expected error from generate_avs_signing_key"),
-        Err(e) => assert!(e.to_string().contains("TCA Error")),
+        Err(e) => {
+            assert_eq!(e.code(), tonic::Code::Unavailable);
+            assert!(e.message().contains("simulated network failure"));
+        }
     }
 
     shutdown_notify.notify_waiters();
@@ -711,12 +812,21 @@ async fn test_extract_trust_domain_with_multiple_san_entries() {
         csr: csr_der,
         evidence: Some(evidence),
         endorsements: Some(endorsements),
+        operator_info: Some(test_operator_info()),
         ..Default::default()
     };
 
     let response = call_certify_attestation(port, request).await.unwrap();
     assert_eq!(response.certificate_chain.len(), 3);
-    validate_cert_chain(&response.certificate_chain, &csr_key_pair, MOCK_TCA_TRUST_DOMAIN);
+    validate_cert_chain(
+        &response.certificate_chain,
+        &csr_key_pair,
+        &ExpectedSan::SpiffeUri(format!(
+            "spiffe://{}/operator/google/encrypted-zone/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
+            MOCK_TCA_TRUST_DOMAIN
+        )),
+        ExpectedEku::None,
+    );
 
     shutdown_notify.notify_waiters();
     server.await.unwrap();
@@ -886,6 +996,7 @@ async fn test_certify_attestation_stream_nonce_mismatch() {
                     csr: csr_der,
                     evidence: Some(evidence),
                     endorsements: Some(endorsements),
+                    operator_info: Some(test_operator_info()),
                     ..Default::default()
                 },
             )),
@@ -973,6 +1084,7 @@ async fn test_certify_attestation_stream_success() {
                     csr: csr_der,
                     evidence: Some(evidence),
                     endorsements: Some(endorsements),
+                    operator_info: Some(test_operator_info()),
                     ..Default::default()
                 },
             )),
@@ -998,7 +1110,171 @@ async fn test_certify_attestation_stream_success() {
             expected_chain_len,
             mode
         );
-        validate_cert_chain(&result.certificate_chain, &csr_key_pair, expected_trust_domain);
+        validate_cert_chain(
+            &result.certificate_chain,
+            &csr_key_pair,
+            &ExpectedSan::SpiffeUri(format!(
+                "spiffe://{}/operator/google/encrypted-zone/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
+                expected_trust_domain
+            )),
+            ExpectedEku::None,
+        );
+
+        test_server.shutdown_notify.notify_waiters();
+        test_server.server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn test_certify_attestation_with_tls_policy() {
+    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
+        let test_server = create_test_server(mode.clone()).await.unwrap();
+
+        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+        let empty_variant: Variant = Variant::default();
+        let endorsements = Endorsements {
+            platform: Some(platform_endorsement.into()),
+            initial: Some(empty_variant),
+            ..Default::default()
+        };
+
+        static SUBJECT: &str = "example.com";
+        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+        let public_key_der = public_key_pem.contents();
+
+        let mut evidence = get_evidence();
+        evidence.signed_user_data_certificate =
+            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+        let request = CertifyAttestationRequest {
+            csr: csr_der,
+            evidence: Some(evidence),
+            endorsements: Some(endorsements),
+            operator_info: Some(test_operator_info()),
+            policy_hint: PolicyHint::EzTsmCbFrontendCertificate.into(),
+        };
+
+        let response = call_certify_attestation(test_server.port, request).await.unwrap();
+        let (expected_chain_len, expected_trust_domain) = match mode {
+            ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
+            ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
+        };
+        assert_eq!(
+            response.certificate_chain.len(),
+            expected_chain_len,
+            "Expected {} certificates in chain for {:?} mode",
+            expected_chain_len,
+            mode
+        );
+        validate_cert_chain(
+            &response.certificate_chain,
+            &csr_key_pair,
+            &ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain)),
+            ExpectedEku::ServerAuth,
+        );
+        test_server.shutdown_notify.notify_waiters();
+        test_server.server.await.unwrap();
+    }
+}
+
+/// Validates that a DNS name conforms to RFC 1123 rules.
+fn assert_valid_dns_name(dns_name: &str) {
+    assert!(!dns_name.is_empty(), "DNS name must not be empty");
+    assert!(
+        dns_name.len() <= 253,
+        "DNS name exceeds 253 characters: {} (len={})",
+        dns_name,
+        dns_name.len()
+    );
+
+    let labels: Vec<&str> = dns_name.split('.').collect();
+    assert!(
+        labels.len() >= 2,
+        "DNS name must have at least 2 labels (got {}): {}",
+        labels.len(),
+        dns_name
+    );
+
+    for (i, label) in labels.iter().enumerate() {
+        assert!(!label.is_empty(), "DNS label at position {} is empty in: {}", i, dns_name);
+        assert!(
+            label.len() <= 63,
+            "DNS label '{}' at position {} exceeds 63 characters (len={})",
+            label,
+            i,
+            label.len()
+        );
+        assert!(
+            label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+            "DNS label '{}' at position {} contains invalid characters (only alphanumeric and hyphens allowed)",
+            label,
+            i
+        );
+        assert!(
+            !label.starts_with('-') && !label.ends_with('-'),
+            "DNS label '{}' at position {} must not start or end with a hyphen",
+            label,
+            i
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_tls_policy_provisions_valid_dns_name() {
+    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
+        let test_server = create_test_server(mode.clone()).await.unwrap();
+
+        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+        let empty_variant: Variant = Variant::default();
+        let endorsements = Endorsements {
+            platform: Some(platform_endorsement.into()),
+            initial: Some(empty_variant),
+            ..Default::default()
+        };
+
+        static SUBJECT: &str = "example.com";
+        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+        let public_key_der = public_key_pem.contents();
+
+        let mut evidence = get_evidence();
+        evidence.signed_user_data_certificate =
+            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+        let request = CertifyAttestationRequest {
+            csr: csr_der,
+            evidence: Some(evidence),
+            endorsements: Some(endorsements),
+            operator_info: Some(test_operator_info()),
+            policy_hint: PolicyHint::EzTsmCbFrontendCertificate.into(),
+        };
+
+        let response = call_certify_attestation(test_server.port, request).await.unwrap();
+        assert!(!response.certificate_chain.is_empty());
+
+        // Extract the DNS name from the leaf certificate's SAN extension.
+        let leaf_cert = x509_cert::Certificate::from_der(&response.certificate_chain[0]).unwrap();
+        let tbs = &leaf_cert.tbs_certificate;
+        let dns_name =
+            get_dns_name(&tbs.extensions).expect("TLS policy certificate must have a DNS SAN");
+
+        // Validate the DNS name is well-formed per RFC 1123.
+        assert_valid_dns_name(&dns_name);
+
+        // Validate the format is <operator_role>.<operator_domain>.<trust_domain>.
+        let labels: Vec<&str> = dns_name.split('.').collect();
+        assert!(
+            labels.len() >= 3,
+            "DNS name must have at least 3 labels (<role>.<domain>.<trust_domain>), got: {}",
+            dns_name
+        );
+        let operator_info = test_operator_info();
+        assert_eq!(labels[0], operator_info.operator_role, "First label must be the operator role");
+        assert_eq!(
+            labels[1], operator_info.operator_domain,
+            "Second label must be the operator domain"
+        );
 
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
