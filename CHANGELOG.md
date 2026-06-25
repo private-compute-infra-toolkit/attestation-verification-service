@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.3.0 (2026-06-25)
+
+
+### Features
+
+* Add a function which loads certificates from glob
+* add constraints on provisioned cert
+* add policy fetcher based on policy hint
+* add policy proto and mapping to AVS repo
+* Bundle PES cert into OCI image
+* introduce EZ and Private Aratea policies
+* introduce prober policy
+* load reference values to certify workloads
+* update reference values for all policies
+
+
+### Bug Fixes
+
+* Store PES prod certs under prod/ directory in tar
+
 ## 0.2.0 (2026-06-18)
 
 

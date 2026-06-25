@@ -1,5 +1,5 @@
 {
-  "checksum": "80954801de40af23ec5c027ca079ff170438d18ba86ac5d286a291dd5a413a83",
+  "checksum": "bb7cd6196b7b8d4844f0529ed9d793bac65a83b8d20c46c8a8baf98fbf434eb7",
   "crates": {
     "aho-corasick 1.1.4": {
       "name": "aho-corasick",
@@ -2160,6 +2160,10 @@
               "target": "env_logger"
             },
             {
+              "id": "glob 0.3.3",
+              "target": "glob"
+            },
+            {
               "id": "log 0.4.29",
               "target": "log"
             },
@@ -3727,6 +3731,45 @@
         "data_glob": [
           "**"
         ]
+      },
+      "license": "MIT OR Apache-2.0",
+      "license_ids": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "license_file": "LICENSE-APACHE"
+    },
+    "glob 0.3.3": {
+      "name": "glob",
+      "version": "0.3.3",
+      "package_url": "https://github.com/rust-lang/glob",
+      "repository": {
+        "Http": {
+          "url": "https://static.crates.io/crates/glob/0.3.3/download",
+          "sha256": "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+        }
+      },
+      "targets": [
+        {
+          "Library": {
+            "crate_name": "glob",
+            "crate_root": "src/lib.rs",
+            "srcs": {
+              "allow_empty": true,
+              "include": [
+                "**/*.rs"
+              ]
+            }
+          }
+        }
+      ],
+      "library_target_name": "glob",
+      "common_attrs": {
+        "compile_data_glob": [
+          "**"
+        ],
+        "edition": "2015",
+        "version": "0.3.3"
       },
       "license": "MIT OR Apache-2.0",
       "license_ids": [
@@ -14616,6 +14659,7 @@
   "direct_deps": [
     "async-trait 0.1.89",
     "env_logger 0.11.8",
+    "glob 0.3.3",
     "log 0.4.29",
     "prost 0.14.3",
     "prost-types 0.14.3",

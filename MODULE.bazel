@@ -184,6 +184,10 @@ crate.spec(
     package = "async-trait",
     version = "0.1",
 )
+crate.spec(
+    package = "glob",
+    version = "0.3.3",
+)
 crate.from_specs(
     cargo_lockfile = "//:Cargo.lock",
     lockfile = "//:cargo-bazel-lock.json",

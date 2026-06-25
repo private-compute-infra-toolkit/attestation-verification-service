@@ -1,0 +1,36 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use avs_proto_rust::avs::{Policy, PolicyHint};
+use prost::Message;
+
+// Embedded policy binaries generated from textproto files at build time.
+const PRIVATE_ARATEA_SERVER_POLICY: &[u8] = include_bytes!("private_aratea_server/policy.binarypb");
+const ENCRYPTED_ZONE_POLICY: &[u8] = include_bytes!("encrypted_zone/policy.binarypb");
+const PROBER_POLICY: &[u8] = include_bytes!("prober/policy.binarypb");
+
+/// Returns the `Policy` associated with the given `PolicyHint`.
+pub fn get_policy(hint: PolicyHint) -> anyhow::Result<Policy> {
+    let policy_bytes = match hint {
+        PolicyHint::Unspecified => {
+            anyhow::bail!("cannot fetch policy for POLICY_HINT_UNSPECIFIED")
+        }
+        PolicyHint::PrivateArateaFrontendCbCertificate => PRIVATE_ARATEA_SERVER_POLICY,
+        PolicyHint::EzEnforcerCbCertificate | PolicyHint::EzTsmCbFrontendCertificate => {
+            ENCRYPTED_ZONE_POLICY
+        }
+        PolicyHint::ProberCbCertificate => PROBER_POLICY,
+    };
+    Policy::decode(policy_bytes).map_err(|e| anyhow::anyhow!("failed to decode policy: {}", e))
+}

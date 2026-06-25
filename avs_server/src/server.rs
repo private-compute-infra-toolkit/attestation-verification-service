@@ -72,7 +72,18 @@ impl AttestationVerification for AttestationVerificationService {
             return Err(Status::failed_precondition("request is missing `operator_info`"));
         };
 
+        #[cfg(feature = "enforce_policy")]
         let identity = csr::validate_csr_request(
+            req.csr.as_slice(),
+            evidence,
+            endorsements,
+            None,
+            req.policy_hint,
+            operator_info,
+        )
+        .map_err(|e| Status::new(tonic::Code::FailedPrecondition, format!("{e:?}")))?;
+        #[cfg(not(feature = "enforce_policy"))]
+        let identity = csr::always_certify_request(
             req.csr.as_slice(),
             evidence,
             endorsements,
@@ -194,7 +205,45 @@ impl AttestationVerification for AttestationVerificationService {
                 }
             };
 
+            #[cfg(feature = "enforce_policy")]
             match csr::validate_csr_request(
+                certify_request.csr.as_slice(),
+                &evidence,
+                &endorsements,
+                Some(&nonce),
+                certify_request.policy_hint,
+                &operator_info,
+            ) {
+                Ok(identity) => match certificate_authority.generate_certificate(&identity) {
+                    Ok(cert) => {
+                        let mut certificate_chain = vec![cert];
+                        certificate_chain
+                            .extend_from_slice(certificate_authority.get_ca_cert_chain_der());
+                        let reply = CertifyAttestationStreamResponse {
+                            response: Some(
+                                certify_attestation_stream_response::Response::CertifyResponse(
+                                    CertifyAttestationResponse { certificate_chain },
+                                ),
+                            ),
+                        };
+                        let _ = tx.send(Ok(reply)).await;
+                    }
+                    Err(e) => {
+                        let _ = tx
+                            .send(Err(Status::internal(format!(
+                                "Failed to generate certificate: {e:?}"
+                            ))))
+                            .await;
+                    }
+                },
+                Err(e) => {
+                    let _ = tx
+                        .send(Err(Status::failed_precondition(format!("Validation failed: {e:?}"))))
+                        .await;
+                }
+            }
+            #[cfg(not(feature = "enforce_policy"))]
+            match csr::always_certify_request(
                 certify_request.csr.as_slice(),
                 &evidence,
                 &endorsements,

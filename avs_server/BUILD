@@ -27,6 +27,7 @@ rust_library(
     name = "avs_server_lib",
     srcs = [
         "src/ca.rs",
+        "src/certs.rs",
         "src/csr.rs",
         "src/lib.rs",
         "src/server.rs",
@@ -35,8 +36,10 @@ rust_library(
         "src/c2sp_policy.txt",
     ],
     deps = [
+        "//avs_server/policies",
         "//avs_server/proto_rust:avs_proto_rust",
         "@boringssl//rust/bssl-sys",
+        "@crates//:glob",
         "@oak//oak_attestation_verification",
         "@oak//oak_attestation_verification_types",
         "@oak//oak_proto_rust",
@@ -96,6 +99,7 @@ rust_test(
         "@oak_crates_index//:prost",
         "@oak_crates_index//:rand",
         "@oak_crates_index//:sha2",
+        "@oak_crates_index//:tempfile",
         "@oak_crates_index//:tokio",
         "@oak_crates_index//:tokio-stream",
         "@oak_crates_index//:tonic",
@@ -118,11 +122,23 @@ tar(
     mutate = mutate(strip_prefix = package_name()),
 )
 
+tar(
+    name = "pes_certs_tar",
+    srcs = ["//:pes_certs"],
+    mutate = mutate(
+        package_dir = "etc/pes-certs/prod",
+        strip_prefix = "resources/pcit_root_certs/prod/pes-cert",
+    ),
+)
+
 oci_image(
     name = "avs_server_image",
     base = "@distroless_cc",
     entrypoint = ["/avs_server"],
-    tars = [":avs_server_tar"],
+    tars = [
+        ":avs_server_tar",
+        ":pes_certs_tar",
+    ],
 )
 
 oci_runtime_bundle(

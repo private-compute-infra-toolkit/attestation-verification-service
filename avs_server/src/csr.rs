@@ -52,9 +52,9 @@ pub(crate) enum ConnectionMode {
 impl From<PolicyHint> for ConnectionMode {
     fn from(hint: PolicyHint) -> Self {
         match hint {
-            PolicyHint::Unspecified | PolicyHint::PrivateArateaFrontendCbCertificate => {
-                ConnectionMode::Unrestricted
-            }
+            PolicyHint::Unspecified
+            | PolicyHint::PrivateArateaFrontendCbCertificate
+            | PolicyHint::ProberCbCertificate => ConnectionMode::Unrestricted,
             PolicyHint::EzEnforcerCbCertificate => ConnectionMode::Mtls,
             PolicyHint::EzTsmCbFrontendCertificate => ConnectionMode::Tls,
         }
@@ -74,8 +74,143 @@ pub(crate) struct ProvisionedIdentity {
     pub(crate) workload_name: String,
 }
 
-/// Validate CSR request and return the provisioned identity.
+use oak_proto_rust::oak::attestation::v1::AmdSevReferenceValues;
+#[cfg(feature = "enforce_policy")]
+use oak_proto_rust::oak::attestation::v1::CbTransparentReferenceValues;
+
+/// Constructs an `AmdSevSnpTransparentDiceAttestationVerifier` from individual
+/// reference value components.
+fn create_transparent_verifier(
+    amd_sev_rvs: &AmdSevReferenceValues,
+    firmware_rvs: &BinaryReferenceValue,
+    kernel_layer_rvs: &KernelLayerReferenceValues,
+    layer1_rvs: &CbLayer1TransparentReferenceValues,
+    layer2_rvs: &CbLayer2TransparentReferenceValues,
+) -> AmdSevSnpTransparentDiceAttestationVerifier {
+    let platform_policy = AmdSevSnpPolicy::new(amd_sev_rvs);
+    let firmware_policy = FirmwarePolicy::new(firmware_rvs);
+    let stage0_policy = TransparentStage0Policy::new(kernel_layer_rvs);
+    let layer1_policy = TransparentLayer1Policy::new(layer1_rvs);
+    let layer2_policy = TransparentLayer2Policy::new(layer2_rvs);
+
+    AmdSevSnpTransparentDiceAttestationVerifier::new(
+        platform_policy,
+        Box::new(firmware_policy),
+        // Event policies are matched to transparent event log entries by
+        // index, so ordering must match: stage 0, layer 1, layer 2.
+        vec![Box::new(stage0_policy), Box::new(layer1_policy), Box::new(layer2_policy)],
+        Arc::new(SystemTimeClock),
+    )
+}
+
+/// Extracts individual reference value components from
+/// `CbTransparentReferenceValues` and constructs an
+/// `AmdSevSnpTransparentDiceAttestationVerifier`.
+#[cfg(feature = "enforce_policy")]
+fn create_cbt_verifier(
+    cbt_ref_values: &CbTransparentReferenceValues,
+) -> anyhow::Result<AmdSevSnpTransparentDiceAttestationVerifier> {
+    let root_layer_rvs =
+        cbt_ref_values.root_layer.as_ref().context("cbt reference values missing root_layer")?;
+    let amd_sev_rvs =
+        root_layer_rvs.amd_sev.as_ref().context("root_layer reference values missing amd_sev")?;
+    let firmware_rvs =
+        amd_sev_rvs.stage0.as_ref().context("amd_sev reference values missing stage0")?;
+    let kernel_layer_rvs = cbt_ref_values
+        .kernel_layer
+        .as_ref()
+        .context("cbt reference values missing kernel_layer")?;
+    let layer1_rvs =
+        cbt_ref_values.layer1.as_ref().context("cbt reference values missing layer1")?;
+    let layer2_rvs =
+        cbt_ref_values.layer2.as_ref().context("cbt reference values missing layer2")?;
+
+    Ok(create_transparent_verifier(
+        amd_sev_rvs,
+        firmware_rvs,
+        kernel_layer_rvs,
+        layer1_rvs,
+        layer2_rvs,
+    ))
+}
+
+/// Validate CSR request using policy-based reference values and return the
+/// provisioned identity.
+///
+/// Looks up the policy by `policy_hint`, extracts the reference values from
+/// the policy's `oak_reference_values` field, constructs a verifier, and
+/// verifies the evidence against those reference values. The returned
+/// `ProvisionedIdentity` is populated from the policy's identity fields.
+#[cfg(feature = "enforce_policy")]
 pub(crate) fn validate_csr_request(
+    csr_der: &[u8],
+    evidence: &Evidence,
+    endorsements: &Endorsements,
+    nonce: Option<&[u8]>,
+    policy_hint: i32,
+    operator_info: &OperatorInfo,
+) -> anyhow::Result<ProvisionedIdentity> {
+    use oak_proto_rust::oak::attestation::v1::reference_values;
+
+    let csr_public_key = verify_csr_and_get_public_key(csr_der)?;
+
+    let hint = PolicyHint::try_from(policy_hint)
+        .map_err(|_| anyhow::anyhow!("unrecognized policy_hint value: {}", policy_hint))?;
+    let policy =
+        policies::get_policy(hint).context("looking up policy for the given policy_hint")?;
+
+    let oak_ref_values =
+        policy.oak_reference_values.as_ref().context("policy is missing oak_reference_values")?;
+    let cbt_ref_values = match oak_ref_values.r#type.as_ref() {
+        Some(reference_values::Type::Cbt(cbt)) => cbt,
+        _ => anyhow::bail!("policy oak_reference_values is not the expected Cbt type"),
+    };
+
+    let verifier = create_cbt_verifier(cbt_ref_values)?;
+    let attestation_results = verifier.verify(evidence, endorsements)?;
+
+    if attestation_results.status != i32::from(Status::Success) {
+        anyhow::bail!(
+            "attestation verification failed with status {:?}: {}",
+            attestation_results.status,
+            attestation_results.reason
+        );
+    }
+
+    verify_data_binding(&attestation_results, &csr_public_key, nonce)?;
+
+    let connection_mode: ConnectionMode = hint.into();
+
+    anyhow::ensure!(
+        !operator_info.operator_domain.is_empty(),
+        "operator_domain must be specified in operator_info"
+    );
+    let operator_domain = operator_info.operator_domain.clone();
+    let operator_role = if operator_info.operator_role.is_empty() {
+        "none".to_string()
+    } else {
+        operator_info.operator_role.clone()
+    };
+
+    Ok(ProvisionedIdentity {
+        public_key: csr_public_key,
+        connection_mode,
+        operator_domain,
+        operator_role,
+        publisher_domain: policy.publisher_domain,
+        publisher_role: policy.publisher_role,
+        workload_name: policy.workload_name,
+    })
+}
+
+/// CSR validation that derives reference values from the evidence itself.
+/// Since the measurements in the evidence are used as both the actual and
+/// expected values, verification always succeeds as long as the evidence is
+/// well-formed.
+///
+/// TODO: b/515710997 - Remove this function once all attestation measurements
+/// are properly endorsed.
+pub(crate) fn always_certify_request(
     csr_der: &[u8],
     evidence: &Evidence,
     endorsements: &Endorsements,
@@ -90,24 +225,16 @@ pub(crate) fn validate_csr_request(
         AmdSevSnpPolicy::evidence_to_reference_values(root_layer)
             .context("deriving reference values from evidence")?;
 
-    let platform_policy = AmdSevSnpPolicy::new(&amd_sev_ref_values);
-    let firmware_policy = FirmwarePolicy::new(&firmware_ref_values);
-
     let (stage0_ref_values, layer1_ref_values, layer2_ref_values) =
         evidence_to_transparent_reference_values(evidence)
             .context("extracting transparent reference values from evidence")?;
 
-    let stage0_policy = TransparentStage0Policy::new(&stage0_ref_values);
-    let layer1_policy = TransparentLayer1Policy::new(&layer1_ref_values);
-    let layer2_policy = TransparentLayer2Policy::new(&layer2_ref_values);
-
-    let verifier = AmdSevSnpTransparentDiceAttestationVerifier::new(
-        platform_policy,
-        Box::new(firmware_policy),
-        // Event policies are matched to transparent event log entries by index,
-        // so ordering must match: stage 0, layer 1, layer 2.
-        vec![Box::new(stage0_policy), Box::new(layer1_policy), Box::new(layer2_policy)],
-        Arc::new(SystemTimeClock),
+    let verifier = create_transparent_verifier(
+        &amd_sev_ref_values,
+        &firmware_ref_values,
+        &stage0_ref_values,
+        &layer1_ref_values,
+        &layer2_ref_values,
     );
     let attestation_results = verifier.verify(evidence, endorsements)?;
 
@@ -136,8 +263,6 @@ pub(crate) fn validate_csr_request(
         operator_info.operator_role.clone()
     };
 
-    // TODO: b/515710997 - Populate these fields with real values derived from
-    // attestation policy instead of hardcoded stubs.
     Ok(ProvisionedIdentity {
         public_key: csr_public_key,
         connection_mode,

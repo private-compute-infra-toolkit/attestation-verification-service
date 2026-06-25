@@ -89,3 +89,8 @@ sh_binary(
         "//avs_server:avs_server_bundle",
     ],
 )
+
+filegroup(
+    name = "pes_certs",
+    srcs = glob(["resources/pcit_root_certs/prod/pes-cert/**/*"]),
+)

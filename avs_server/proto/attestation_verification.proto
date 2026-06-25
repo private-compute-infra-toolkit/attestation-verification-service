@@ -16,10 +16,10 @@
 
 syntax = "proto3";
 
-import "proto/attestation/evidence.proto";
-import "proto/attestation/endorsement.proto";
-
 package attestation_verification;
+
+import "proto/attestation/endorsement.proto";
+import "proto/attestation/evidence.proto";
 
 // Attestation Verification Service (AVS) acts as an intermediate certificate
 // authority for workloads. A workload may present its attestation in exchange
@@ -28,20 +28,17 @@ package attestation_verification;
 // is verified prior to establishing trust in any of its verification results.
 service AttestationVerification {
   // Checks whether a provided attestation abides by a set of public policies.
-  rpc CertifyAttestation(CertifyAttestationRequest)
-      returns (CertifyAttestationResponse);
+  rpc CertifyAttestation(CertifyAttestationRequest) returns (CertifyAttestationResponse);
 
   // Interactive version of CertifyAttestation.
-  rpc CertifyAttestationStream(stream CertifyAttestationStreamRequest)
-      returns (stream CertifyAttestationStreamResponse);
+  rpc CertifyAttestationStream(stream CertifyAttestationStreamRequest) returns (stream CertifyAttestationStreamResponse);
 
   // Generates a new AVS signing key pair and applies for a new certificate from
   // TCA (Trusted Certificate Authority). Upon success, the newly generated
   // signing key pair is immediately used henceforth to sign `CertifyAttestation`
   // results. The provisioned certificate from TCA will also be included in the
   // certification results.
-  rpc GenerateAvsSigningKey(GenerateAvsSigningKeyRequest) returns
-      (GenerateAvsSigningKeyResponse);
+  rpc GenerateAvsSigningKey(GenerateAvsSigningKeyRequest) returns (GenerateAvsSigningKeyResponse);
 }
 
 // The identity of the entity managing the infrastructure where a workload is
@@ -65,6 +62,7 @@ enum PolicyHint {
   PRIVATE_ARATEA_FRONTEND_CB_CERTIFICATE = 1;
   EZ_ENFORCER_CB_CERTIFICATE = 2;
   EZ_TSM_CB_FRONTEND_CERTIFICATE = 3;
+  PROBER_CB_CERTIFICATE = 4;
 }
 
 message CertifyAttestationRequest {

@@ -28,3 +28,11 @@ proto_library(
         "@oak//proto/attestation:evidence_proto",
     ],
 )
+
+proto_library(
+    name = "policy_proto",
+    srcs = ["policy.proto"],
+    deps = [
+        "@oak//proto/attestation:reference_value_proto",
+    ],
+)

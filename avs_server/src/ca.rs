@@ -201,6 +201,16 @@ impl CertificateAuthority {
                 return Err(e);
             }
 
+            if let Err(e) = Self::set_x509_leaf_basic_constraints(x509) {
+                bssl_sys::X509_free(x509);
+                return Err(e);
+            }
+
+            if let Err(e) = Self::set_x509_key_usage(x509) {
+                bssl_sys::X509_free(x509);
+                return Err(e);
+            }
+
             if let Err(e) = Self::set_x509_validity(x509, CERT_VALIDITY) {
                 bssl_sys::X509_free(x509);
                 return Err(e);
@@ -412,7 +422,7 @@ impl CertificateAuthority {
                 bssl_sys::X509_free(x509);
                 return Err(e);
             }
-            if let Err(e) = Self::set_x509_basic_constraints(x509) {
+            if let Err(e) = Self::set_x509_ca_basic_constraints(x509) {
                 bssl_sys::X509_free(x509);
                 return Err(e);
             }
@@ -450,9 +460,11 @@ impl CertificateAuthority {
         Ok(())
     }
 
-    // Add a constraint to X509 to mark as a cert capable of signing other
-    // certs.
-    fn set_x509_basic_constraints(x509: *mut bssl_sys::X509) -> anyhow::Result<()> {
+    // Add a BasicConstraints extension with CA:TRUE (critical) to mark the
+    // certificate as a CA capable of signing other certificates.
+    // See RFC 5280 Section 4.2.1.9:
+    // https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.9
+    fn set_x509_ca_basic_constraints(x509: *mut bssl_sys::X509) -> anyhow::Result<()> {
         unsafe {
             let basic_constraints = bssl_sys::BASIC_CONSTRAINTS_new();
             if basic_constraints.is_null() {
@@ -487,6 +499,58 @@ impl CertificateAuthority {
             }
             bssl_sys::X509_EXTENSION_free(ext);
             bssl_sys::BASIC_CONSTRAINTS_free(basic_constraints);
+        }
+        Ok(())
+    }
+
+    // Sets BasicConstraints to CA:FALSE (critical) to ensure the certificate
+    // cannot be used as a CA certificate.
+    // See RFC 5280 Section 4.2.1.9:
+    // https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.9
+    fn set_x509_leaf_basic_constraints(x509: *mut bssl_sys::X509) -> anyhow::Result<()> {
+        let value = std::ffi::CString::new("critical,CA:FALSE")
+            .map_err(|_| anyhow::anyhow!("Failed to create BasicConstraints value string"))?;
+        unsafe {
+            let ext = bssl_sys::X509V3_EXT_nconf_nid(
+                /* conf= */ std::ptr::null_mut(),
+                /* ctx= */ std::ptr::null(),
+                /* ext_nid= */ bssl_sys::NID_basic_constraints,
+                /* value= */ value.as_ptr(),
+            );
+            if ext.is_null() {
+                anyhow::bail!("Failed to create leaf BasicConstraints extension");
+            }
+            if bssl_sys::X509_add_ext(x509, ext, -1) != 1 {
+                bssl_sys::X509_EXTENSION_free(ext);
+                anyhow::bail!("Failed to add leaf BasicConstraints extension");
+            }
+            bssl_sys::X509_EXTENSION_free(ext);
+        }
+        Ok(())
+    }
+
+    // Sets Key Usage to digitalSignature (critical).
+    // digitalSignature is required for the TLS 1.3 handshake signature.
+    // See RFC 5280 Section 4.2.1.3:
+    // https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.3
+    fn set_x509_key_usage(x509: *mut bssl_sys::X509) -> anyhow::Result<()> {
+        let value = std::ffi::CString::new("critical,digitalSignature")
+            .map_err(|_| anyhow::anyhow!("Failed to create Key Usage value string"))?;
+        unsafe {
+            let ext = bssl_sys::X509V3_EXT_nconf_nid(
+                /* conf= */ std::ptr::null_mut(),
+                /* ctx= */ std::ptr::null(),
+                /* ext_nid= */ bssl_sys::NID_key_usage,
+                /* value= */ value.as_ptr(),
+            );
+            if ext.is_null() {
+                anyhow::bail!("Failed to create Key Usage extension");
+            }
+            if bssl_sys::X509_add_ext(x509, ext, -1) != 1 {
+                bssl_sys::X509_EXTENSION_free(ext);
+                anyhow::bail!("Failed to add Key Usage extension");
+            }
+            bssl_sys::X509_EXTENSION_free(ext);
         }
         Ok(())
     }

@@ -15,5 +15,6 @@
 //
 
 pub mod ca;
+pub mod certs;
 pub mod csr;
 pub mod server;

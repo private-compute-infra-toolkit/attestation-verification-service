@@ -43,6 +43,7 @@ cargo_build_script(
     },
     data = [
         "//avs_server/proto:attestation_verification.proto",
+        "//avs_server/proto:policy.proto",
         "@com_google_protobuf//:descriptor_proto_srcs",
         "@com_google_protobuf//:well_known_type_protos",
         "@oak//proto:digest.proto",
@@ -51,6 +52,8 @@ cargo_build_script(
         "@oak//proto/attestation:endorsement.proto",
         "@oak//proto/attestation:eventlog.proto",
         "@oak//proto/attestation:evidence.proto",
+        "@oak//proto/attestation:reference_value.proto",
+        "@oak//proto/attestation:tcb_version.proto",
         "@oak//proto/crypto:certificate.proto",
     ],
     tools = [

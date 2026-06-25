@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .extern_path(".oak.attestation.v1", "::oak_proto_rust::oak::attestation::v1")
         .compile_protos(
-            &["../proto/attestation_verification.proto"],
+            &["../proto/attestation_verification.proto", "../proto/policy.proto"],
             &["../", "../../", protobuf_include_path, oak_include_path],
         )?;
 

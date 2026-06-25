@@ -212,6 +212,10 @@ fn test_operator_info() -> OperatorInfo {
     }
 }
 
+fn test_prober_operator_info() -> OperatorInfo {
+    OperatorInfo { operator_domain: "google".to_string(), operator_role: "prober".to_string() }
+}
+
 enum ExpectedEku {
     None,
     ServerAuth,
@@ -319,6 +323,33 @@ fn validate_cert_chain(
             );
         }
     }
+
+    // Validate BasicConstraints: must be present, critical, with CA:FALSE.
+    const BASIC_CONSTRAINTS_OID: x509_cert::spki::ObjectIdentifier =
+        x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.19");
+    let bc_ext = tbs
+        .extensions
+        .as_ref()
+        .and_then(|exts| exts.iter().find(|ext| ext.extn_id == BASIC_CONSTRAINTS_OID))
+        .expect("leaf certificate must have BasicConstraints extension");
+    assert!(bc_ext.critical, "BasicConstraints extension must be critical");
+    let bc = x509_cert::ext::pkix::BasicConstraints::from_der(bc_ext.extn_value.as_bytes())
+        .expect("failed to parse BasicConstraints extension");
+    assert!(!bc.ca, "leaf certificate BasicConstraints must have CA:FALSE");
+
+    // Validate Key Usage: must be present, critical, with digitalSignature.
+    const KEY_USAGE_OID: x509_cert::spki::ObjectIdentifier =
+        x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.15");
+    let ku_ext = tbs
+        .extensions
+        .as_ref()
+        .and_then(|exts| exts.iter().find(|ext| ext.extn_id == KEY_USAGE_OID))
+        .expect("leaf certificate must have Key Usage extension");
+    assert!(ku_ext.critical, "Key Usage extension must be critical");
+    let ku = x509_cert::ext::pkix::KeyUsage::from_der(ku_ext.extn_value.as_bytes())
+        .expect("failed to parse Key Usage extension");
+    assert!(ku.digital_signature(), "Key Usage must include digitalSignature");
+    assert!(!ku.key_encipherment(), "Key Usage must NOT include keyEncipherment");
 
     // Validate that each certificate in the chain is signed by the next.
     for i in 0..certificate_chain.len() - 1 {
@@ -1178,6 +1209,62 @@ async fn test_certify_attestation_with_tls_policy() {
     }
 }
 
+#[tokio::test]
+async fn test_certify_attestation_with_prober_policy() {
+    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
+        let test_server = create_test_server(mode.clone()).await.unwrap();
+
+        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+        let empty_variant: Variant = Variant::default();
+        let endorsements = Endorsements {
+            platform: Some(platform_endorsement.into()),
+            initial: Some(empty_variant),
+            ..Default::default()
+        };
+
+        static SUBJECT: &str = "example.com";
+        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+        let public_key_der = public_key_pem.contents();
+
+        let mut evidence = get_evidence();
+        evidence.signed_user_data_certificate =
+            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+        let request = CertifyAttestationRequest {
+            csr: csr_der,
+            evidence: Some(evidence),
+            endorsements: Some(endorsements),
+            operator_info: Some(test_prober_operator_info()),
+            policy_hint: PolicyHint::ProberCbCertificate.into(),
+        };
+
+        let response = call_certify_attestation(test_server.port, request).await.unwrap();
+        let (expected_chain_len, expected_trust_domain) = match mode {
+            ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
+            ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
+        };
+        assert_eq!(
+            response.certificate_chain.len(),
+            expected_chain_len,
+            "Expected {} certificates in chain for {:?} mode",
+            expected_chain_len,
+            mode
+        );
+        validate_cert_chain(
+            &response.certificate_chain,
+            &csr_key_pair,
+            &ExpectedSan::SpiffeUri(format!(
+                "spiffe://{}/operator/google/prober/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
+                expected_trust_domain
+            )),
+            ExpectedEku::None,
+        );
+        test_server.shutdown_notify.notify_waiters();
+        test_server.server.await.unwrap();
+    }
+}
+
 /// Validates that a DNS name conforms to RFC 1123 rules.
 fn assert_valid_dns_name(dns_name: &str) {
     assert!(!dns_name.is_empty(), "DNS name must not be empty");
@@ -1279,4 +1366,32 @@ async fn test_tls_policy_provisions_valid_dns_name() {
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
     }
+}
+
+#[test]
+fn test_load_certificates() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let temp_path = temp_dir.path();
+
+    // Create a nested directory structure
+    let subdir_path = temp_path.join("x");
+    std::fs::create_dir_all(&subdir_path).unwrap();
+
+    // Write dummy certificate files
+    std::fs::write(temp_path.join("cert1.pem"), "CERT CONTENT 1").unwrap();
+    std::fs::write(subdir_path.join("cert2.pem"), "CERT CONTENT 2").unwrap();
+
+    // Write text files that should be ignored
+    std::fs::write(temp_path.join("note1.txt"), "NOTE 1").unwrap();
+    std::fs::write(subdir_path.join("note2.txt"), "NOTE 2").unwrap();
+
+    // Load certificates using a glob pattern matching all .pem files under the temp
+    // directory
+    let glob_pattern = format!("{}/**/*.pem", temp_path.to_string_lossy());
+    let mut certs = avs_server_lib::certs::load_certificates(&glob_pattern).unwrap();
+    certs.sort(); // Sort to ensure deterministic order
+
+    assert_eq!(certs.len(), 2);
+    assert_eq!(certs[0], "CERT CONTENT 1");
+    assert_eq!(certs[1], "CERT CONTENT 2");
 }
