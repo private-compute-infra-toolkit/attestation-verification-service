@@ -60,7 +60,8 @@ oak_reference_values {
               claim_types: "https://github.com/project-oak/oak/blob/main/docs/tr/claim/10271.md"
             }
             tlog {
-              skip {
+              pes {
+                # PES public key set inserted dynamically.
               }
             }
           }
@@ -111,7 +112,8 @@ oak_reference_values {
           required_claims {
           }
           tlog {
-            skip {
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }
@@ -148,20 +150,24 @@ oak_reference_values {
           required_claims {
           }
           tlog {
-            skip {
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }
       }
       memory_map {
+        # E820 table digest endorsement - SKIP
         skip {
         }
       }
       acpi {
+        # ACPI table digest endorsement - SKIP
         skip {
         }
       }
       kernel_cmd_line_text {
+        # Kernel command line digest endorsement - SKIP
         skip {
         }
       }
@@ -199,7 +205,8 @@ oak_reference_values {
           required_claims {
           }
           tlog {
-            skip {
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }
@@ -236,7 +243,8 @@ oak_reference_values {
           required_claims {
           }
           tlog {
-            skip {
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }
@@ -313,6 +321,9 @@ oak_reference_values {
                 key_id: 1
                 raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004\330m\230\373kZm\324\325\344\027\006\210\0221\321\257_\000\\+\220\026\346-!\255\222\316\013\336\245\372\311\2064\316\347\301\236\020\274R\277\342\313\236F\205c\377\364\017\333cb\341\013}\014\367\344X\267"
               }
+            }
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }

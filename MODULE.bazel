@@ -212,18 +212,18 @@ archive_override(
     patches = [
         "//third_party/boringssl:boringssl.patch",
     ],
-    sha256 = "b2d64c4d52c505d60b0fb86833568dc4762445910d7a7757ff9b172e5556cb01",
-    strip_prefix = "boringssl-0.20250415.0",
-    urls = ["https://github.com/google/boringssl/releases/download/0.20250415.0/boringssl-0.20250415.0.tar.gz"],
+    sha256 = "d1c599485fd1919d75ea2925af5fff81c1d5b21ab2f0d41fee1f788b1d917159",
+    strip_prefix = "boringssl-0.20260616.0",
+    urls = ["https://github.com/google/boringssl/releases/download/0.20260616.0/boringssl-0.20260616.0.tar.gz"],
 )
 
 # TODO: b/496109194 - Delete dependencies introduced to AVS repo specifically for Oak.
 bazel_dep(name = "oak", version = "0.0.0")
 archive_override(
     module_name = "oak",
-    sha256 = "cdb90bfb63916a827a6768b624a3a293a506d83929eea3b40afcde3fe3628f8b",
-    strip_prefix = "oak-a9f7d9ccaa7cb670ec013e724e5618a70af95858",
-    url = "https://github.com/project-oak/oak/archive/a9f7d9ccaa7cb670ec013e724e5618a70af95858.tar.gz",
+    sha256 = "f11df32e71ed5332d5fe0faf78b978ccb27971c93698d6e8b7081395c8fd0fd9",
+    strip_prefix = "oak-4e8a329fd152bb69c038e51f7f551b99ddc77d98",
+    url = "https://github.com/project-oak/oak/archive/4e8a329fd152bb69c038e51f7f551b99ddc77d98.tar.gz",
 )
 
 oak_aliased_crates = use_extension(

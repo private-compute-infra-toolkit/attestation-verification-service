@@ -28,6 +28,7 @@ rust_library(
     srcs = [
         "src/ca.rs",
         "src/certs.rs",
+        "src/config.rs",
         "src/csr.rs",
         "src/lib.rs",
         "src/server.rs",
@@ -47,6 +48,8 @@ rust_library(
         "@oak//oak_time:oak_time_std",
         "@oak_crates_index//:anyhow",
         "@oak_crates_index//:log",
+        "@oak_crates_index//:serde",
+        "@oak_crates_index//:serde_json",
         "@oak_crates_index//:tokio",
         "@oak_crates_index//:tokio-stream",
         "@oak_crates_index//:tonic",
@@ -56,7 +59,9 @@ rust_library(
 
 rust_binary(
     name = "avs_server",
-    srcs = ["src/main.rs"],
+    srcs = [
+        "src/main.rs",
+    ],
     deps = [
         ":avs_server_lib",
         "//avs_server/proto_rust:avs_proto_rust",
@@ -105,6 +110,11 @@ rust_test(
         "@oak_crates_index//:tonic",
         "@tca-sdk//rust/common:tca_common",
     ],
+)
+
+rust_test(
+    name = "avs_server_lib_unit_test",
+    crate = ":avs_server_lib",
 )
 
 rust_test(

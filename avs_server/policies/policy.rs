@@ -34,3 +34,53 @@ pub fn get_policy(hint: PolicyHint) -> anyhow::Result<Policy> {
     };
     Policy::decode(policy_bytes).map_err(|e| anyhow::anyhow!("failed to decode policy: {}", e))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_policy_unspecified_returns_error() {
+        let result = get_policy(PolicyHint::Unspecified);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_policy_private_aratea_returns_valid_policy() {
+        let policy = get_policy(PolicyHint::PrivateArateaFrontendCbCertificate)
+            .expect("failed to get policy");
+        assert_eq!(policy.workload_name, "private-aratea-server");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_ez_enforcer_returns_valid_policy() {
+        let policy = get_policy(PolicyHint::EzEnforcerCbCertificate).expect("failed to get policy");
+        assert_eq!(policy.workload_name, "encrypted-zone");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_ez_tsm_frontend_returns_valid_policy() {
+        let policy =
+            get_policy(PolicyHint::EzTsmCbFrontendCertificate).expect("failed to get policy");
+        assert_eq!(policy.workload_name, "encrypted-zone");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_ez_enforcer_and_tsm_frontend_return_same_policy() {
+        let enforcer =
+            get_policy(PolicyHint::EzEnforcerCbCertificate).expect("failed to get policy");
+        let frontend =
+            get_policy(PolicyHint::EzTsmCbFrontendCertificate).expect("failed to get policy");
+        assert_eq!(enforcer, frontend);
+    }
+
+    #[test]
+    fn get_policy_prober_returns_valid_policy() {
+        let policy = get_policy(PolicyHint::ProberCbCertificate).expect("failed to get policy");
+        assert_eq!(policy.workload_name, "prober");
+        assert!(policy.oak_reference_values.is_some());
+    }
+}

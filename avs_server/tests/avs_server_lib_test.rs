@@ -562,7 +562,9 @@ async fn test_invalid_csr_error() {
 
         match call_certify_attestation(test_server.port, request).await {
             Ok(_) => panic!("certify_attestation() should fail."),
-            Err(e) => assert!(e.to_string().contains("failed to parse CSR: HEADER_TOO_LONG")),
+            Err(e) => {
+                assert!(e.to_string().contains("failed to parse CSR"), "unexpected error: {}", e)
+            }
         }
 
         static SUBJECT: &str = "example.com";
@@ -577,7 +579,9 @@ async fn test_invalid_csr_error() {
 
         match call_certify_attestation(test_server.port, request).await {
             Ok(_) => panic!("certify_attestation() should fail."),
-            Err(e) => assert!(e.to_string().contains("failed to parse CSR: BAD_OBJECT_HEADER")),
+            Err(e) => {
+                assert!(e.to_string().contains("failed to parse CSR"), "unexpected error: {}", e)
+            }
         }
 
         test_server.shutdown_notify.notify_waiters();

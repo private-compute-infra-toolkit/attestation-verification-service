@@ -16,23 +16,15 @@
 
 use anyhow::Context;
 use avs_proto_rust::avs::attestation_verification_server::AttestationVerificationServer;
+use avs_server_lib::config::AppConfig;
 use avs_server_lib::server::AttestationVerificationService;
 use log::info;
 use oak_sdk_containers::{default_orchestrator_channel, OrchestratorClient};
-use serde::Deserialize;
 use std::sync::Arc;
 use tca_common::TcaClient;
 use tca_oak::OakTcaClient;
 use tonic::transport::Server;
 use tonic::Status;
-
-#[derive(Deserialize)]
-struct AppConfig {
-    #[serde(default)]
-    use_tca_cert_chain: bool,
-    #[serde(default)]
-    tca_endpoint: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,13 +42,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config_string = String::from_utf8(orchestrator_client.get_application_config().await?)?;
     info!("AVS: Application config string: {}", config_string);
-    let config: AppConfig =
-        serde_json::from_str(&config_string).context("failed to parse application config")?;
+    let config: AppConfig = if config_string.is_empty() {
+        AppConfig::default()
+    } else {
+        serde_json::from_str(&config_string).context("failed to parse application config")?
+    };
 
-    info!("AVS: use_tca_cert_chain: {}", config.use_tca_cert_chain);
+    info!("AVS: use_self_signed_cert: {}", config.use_self_signed_cert);
 
     info!("AVS: Creating AttestationVerificationService");
-    let tca_client: Option<Arc<dyn TcaClient>> = if config.use_tca_cert_chain {
+    let tca_client: Option<Arc<dyn TcaClient>> = if !config.use_self_signed_cert {
         let tca_endpoint = config.tca_endpoint;
         info!("AVS: TCA endpoint: \"{}\"", tca_endpoint);
         info!("AVS: Initializing OakTcaClient...");

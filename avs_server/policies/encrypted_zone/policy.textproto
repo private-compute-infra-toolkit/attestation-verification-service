@@ -22,8 +22,6 @@ publisher_domain: "google.com"
 publisher_role: "pcit-release-bot"
 workload_name: "encrypted-zone"
 
-# TODO: b/515710997 - Populate oak_reference_values with known-good reference values
-# for the Encrypted Zone role.
 oak_reference_values {
   cbt {
     root_layer {
@@ -62,7 +60,8 @@ oak_reference_values {
               claim_types: "https://github.com/project-oak/oak/blob/main/docs/tr/claim/10271.md"
             }
             tlog {
-              skip {
+              pes {
+                # PES public key set inserted dynamically.
               }
             }
           }
@@ -113,7 +112,8 @@ oak_reference_values {
           required_claims {
           }
           tlog {
-            skip {
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }
@@ -150,20 +150,24 @@ oak_reference_values {
           required_claims {
           }
           tlog {
-            skip {
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }
       }
       memory_map {
+        # E820 table digest endorsement - SKIP
         skip {
         }
       }
       acpi {
+        # ACPI table digest endorsement - SKIP
         skip {
         }
       }
       kernel_cmd_line_text {
+        # Kernel command line digest endorsement - SKIP
         skip {
         }
       }
@@ -201,7 +205,8 @@ oak_reference_values {
           required_claims {
           }
           tlog {
-            skip {
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }
@@ -238,12 +243,15 @@ oak_reference_values {
           required_claims {
           }
           tlog {
-            skip {
+            pes {
+              # PES public key set inserted dynamically.
             }
           }
         }
       }
     }
+    # TODO: b/515710997 - Populate layer2 with known-good reference values for
+    # the Encrypted Zone role.
     layer2 {
       binary_mpm {
         skip {

@@ -16,5 +16,6 @@
 
 pub mod ca;
 pub mod certs;
+pub mod config;
 pub mod csr;
 pub mod server;
