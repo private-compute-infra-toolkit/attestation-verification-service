@@ -21,7 +21,7 @@ use tca_common::TcaClient;
 
 const CERT_VALIDITY: i64 = 365;
 const SEC_DAYS: i64 = 24 * 60 * 60;
-const ISSUER_NAME: &str = "avs";
+const ISSUER_NAME: &str = "Attestation Verification Service";
 
 // Trust domain for the SPIFFE identity in self-signed mode (no TCA).
 const SELF_SIGNED_TRUST_DOMAIN: &str = "prod.google.com.avs.pcit.goog";

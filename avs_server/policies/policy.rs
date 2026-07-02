@@ -15,6 +15,9 @@
 use avs_proto_rust::avs::{Policy, PolicyHint};
 use prost::Message;
 
+mod certs;
+mod pes;
+
 // Embedded policy binaries generated from textproto files at build time.
 const PRIVATE_ARATEA_SERVER_POLICY: &[u8] = include_bytes!("private_aratea_server/policy.binarypb");
 const ENCRYPTED_ZONE_POLICY: &[u8] = include_bytes!("encrypted_zone/policy.binarypb");
@@ -32,7 +35,12 @@ pub fn get_policy(hint: PolicyHint) -> anyhow::Result<Policy> {
         }
         PolicyHint::ProberCbCertificate => PROBER_POLICY,
     };
-    Policy::decode(policy_bytes).map_err(|e| anyhow::anyhow!("failed to decode policy: {}", e))
+    let mut policy = Policy::decode(policy_bytes)
+        .map_err(|e| anyhow::anyhow!("failed to decode policy: {}", e))?;
+
+    pes::inject_pes_keys(&mut policy)?;
+
+    Ok(policy)
 }
 
 #[cfg(test)]
@@ -80,7 +88,7 @@ mod tests {
     #[test]
     fn get_policy_prober_returns_valid_policy() {
         let policy = get_policy(PolicyHint::ProberCbCertificate).expect("failed to get policy");
-        assert_eq!(policy.workload_name, "prober");
+        assert_eq!(policy.workload_name, "attestation-verification-service-prober");
         assert!(policy.oak_reference_values.is_some());
     }
 }

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.5.0 (2026-07-02)
+
+
+### Dependencies
+
+* **deps:** Update DevKit to release-3.10.0
+
+
+### Features
+
+* Pass public keys from PES certs to policies
+* update issuer name in leaf cert
+* update prober workload names in attestation policy
+
 ## 0.4.0 (2026-06-29)
 
 

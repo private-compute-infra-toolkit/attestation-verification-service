@@ -23,38 +23,56 @@ package(
     default_visibility = ["//visibility:public"],
 )
 
+AVS_SERVER_LIB_SRCS = [
+    "src/ca.rs",
+    "src/config.rs",
+    "src/csr.rs",
+    "src/lib.rs",
+    "src/server.rs",
+]
+
+AVS_SERVER_LIB_DEPS = [
+    "//avs_server/proto_rust:avs_proto_rust",
+    "@boringssl//rust/bssl-sys",
+    "@crates//:glob",
+    "@oak//oak_attestation_verification",
+    "@oak//oak_attestation_verification_types",
+    "@oak//oak_proto_rust",
+    "@oak//oak_time",
+    "@oak//oak_time:oak_time_std",
+    "@oak_crates_index//:anyhow",
+    "@oak_crates_index//:log",
+    "@oak_crates_index//:serde",
+    "@oak_crates_index//:serde_json",
+    "@oak_crates_index//:tokio",
+    "@oak_crates_index//:tokio-stream",
+    "@oak_crates_index//:tonic",
+    "@tca-sdk//rust/common:tca_common",
+]
+
+AVS_SERVER_DEPS = [
+    "//avs_server/proto_rust:avs_proto_rust",
+    "@oak//oak_sdk/containers:oak_sdk_containers",
+    "@oak_crates_index//:anyhow",
+    "@oak_crates_index//:env_logger",
+    "@oak_crates_index//:log",
+    "@oak_crates_index//:serde",
+    "@oak_crates_index//:serde_json",
+    "@oak_crates_index//:tokio",
+    "@oak_crates_index//:tonic",
+    "@tca-sdk//rust/common:tca_common",
+    "@tca-sdk//rust/oak:tca_oak",
+]
+
 rust_library(
     name = "avs_server_lib",
-    srcs = [
-        "src/ca.rs",
-        "src/certs.rs",
-        "src/config.rs",
-        "src/csr.rs",
-        "src/lib.rs",
-        "src/server.rs",
-    ],
+    srcs = AVS_SERVER_LIB_SRCS,
     compile_data = [
         "src/c2sp_policy.txt",
     ],
     deps = [
         "//avs_server/policies",
-        "//avs_server/proto_rust:avs_proto_rust",
-        "@boringssl//rust/bssl-sys",
-        "@crates//:glob",
-        "@oak//oak_attestation_verification",
-        "@oak//oak_attestation_verification_types",
-        "@oak//oak_proto_rust",
-        "@oak//oak_time",
-        "@oak//oak_time:oak_time_std",
-        "@oak_crates_index//:anyhow",
-        "@oak_crates_index//:log",
-        "@oak_crates_index//:serde",
-        "@oak_crates_index//:serde_json",
-        "@oak_crates_index//:tokio",
-        "@oak_crates_index//:tokio-stream",
-        "@oak_crates_index//:tonic",
-        "@tca-sdk//rust/common:tca_common",
-    ],
+    ] + AVS_SERVER_LIB_DEPS,
 )
 
 rust_binary(
@@ -64,18 +82,7 @@ rust_binary(
     ],
     deps = [
         ":avs_server_lib",
-        "//avs_server/proto_rust:avs_proto_rust",
-        "@oak//oak_sdk/containers:oak_sdk_containers",
-        "@oak_crates_index//:anyhow",
-        "@oak_crates_index//:env_logger",
-        "@oak_crates_index//:log",
-        "@oak_crates_index//:serde",
-        "@oak_crates_index//:serde_json",
-        "@oak_crates_index//:tokio",
-        "@oak_crates_index//:tonic",
-        "@tca-sdk//rust/common:tca_common",
-        "@tca-sdk//rust/oak:tca_oak",
-    ],
+    ] + AVS_SERVER_DEPS,
 )
 
 rust_test(

@@ -233,7 +233,7 @@ fn validate_cert_chain(
 
     let leaf_cert = x509_cert::Certificate::from_der(&certificate_chain[0]).unwrap();
     let tbs = &leaf_cert.tbs_certificate;
-    assert_eq!(tbs.issuer.to_string(), "CN=avs");
+    assert_eq!(tbs.issuer.to_string(), "CN=Attestation Verification Service");
 
     // Check that the public key in the cert matches the CSR's public key
     // Note that there is a difference in how the two PEMs are formatted. One
@@ -1370,32 +1370,4 @@ async fn test_tls_policy_provisions_valid_dns_name() {
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
     }
-}
-
-#[test]
-fn test_load_certificates() {
-    let temp_dir = tempfile::tempdir().unwrap();
-    let temp_path = temp_dir.path();
-
-    // Create a nested directory structure
-    let subdir_path = temp_path.join("x");
-    std::fs::create_dir_all(&subdir_path).unwrap();
-
-    // Write dummy certificate files
-    std::fs::write(temp_path.join("cert1.pem"), "CERT CONTENT 1").unwrap();
-    std::fs::write(subdir_path.join("cert2.pem"), "CERT CONTENT 2").unwrap();
-
-    // Write text files that should be ignored
-    std::fs::write(temp_path.join("note1.txt"), "NOTE 1").unwrap();
-    std::fs::write(subdir_path.join("note2.txt"), "NOTE 2").unwrap();
-
-    // Load certificates using a glob pattern matching all .pem files under the temp
-    // directory
-    let glob_pattern = format!("{}/**/*.pem", temp_path.to_string_lossy());
-    let mut certs = avs_server_lib::certs::load_certificates(&glob_pattern).unwrap();
-    certs.sort(); // Sort to ensure deterministic order
-
-    assert_eq!(certs.len(), 2);
-    assert_eq!(certs[0], "CERT CONTENT 1");
-    assert_eq!(certs[1], "CERT CONTENT 2");
 }

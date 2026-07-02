@@ -20,20 +20,32 @@ package(
 
 rust_library(
     name = "policies",
-    srcs = ["policy.rs"],
+    srcs = [
+        "certs.rs",
+        "pes.rs",
+        "policy.rs",
+    ],
     compile_data = [
         "//avs_server/policies/private_aratea_server:policy_binarypb",
         "//avs_server/policies/encrypted_zone:policy_binarypb",
         "//avs_server/policies/prober:policy_binarypb",
     ],
+    crate_root = "policy.rs",
     deps = [
         "//avs_server/proto_rust:avs_proto_rust",
+        "@boringssl//rust/bssl-sys",
+        "@crates//:glob",
+        "@oak//oak_proto_rust",
         "@oak_crates_index//:anyhow",
         "@oak_crates_index//:prost",
+        "@oak_crates_index//:prost-types",
     ],
 )
 
 rust_test(
     name = "policies_test",
     crate = ":policies",
+    deps = [
+        "@oak_crates_index//:tempfile",
+    ],
 )

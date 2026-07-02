@@ -20,7 +20,7 @@
 
 publisher_domain: "google.com"
 publisher_role: "pcit-release-bot"
-workload_name: "prober"
+workload_name: "attestation-verification-service-prober"
 
 oak_reference_values {
   cbt {
