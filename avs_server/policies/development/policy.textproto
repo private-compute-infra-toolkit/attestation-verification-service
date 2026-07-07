@@ -1,0 +1,84 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# proto-file: avs_server/proto/policy.proto
+# proto-message: attestation_verification.Policy
+#
+# Development policy for the development certificate role
+# (PolicyHints: DEVELOPMENT_CB_CERTIFICATE, DEVELOPMENT_MTLS_CB_CERTIFICATE,
+# DEVELOPMENT_TLS_CB_CERTIFICATE).
+# All reference values use `skip {}` so any attestation passes.
+
+publisher_domain: "untrusted.com"
+publisher_role: "none"
+workload_name: "unendorsed-development"
+
+oak_reference_values {
+  cbt {
+    root_layer {
+      amd_sev {
+        stage0 {
+          skip {
+          }
+        }
+        milan {
+          skip {
+          }
+        }
+      }
+      intel_tdx {
+      }
+      insecure {
+      }
+    }
+    kernel_layer {
+      kernel {
+        skip {
+        }
+      }
+      init_ram_fs {
+        skip {
+        }
+      }
+      memory_map {
+        skip {
+        }
+      }
+      acpi {
+        skip {
+        }
+      }
+      kernel_cmd_line_text {
+        skip {
+        }
+      }
+    }
+    layer1 {
+      runtime_agent_binary {
+        skip {
+        }
+      }
+      userspace {
+        skip {
+        }
+      }
+    }
+    layer2 {
+      binary_mpm {
+        skip {
+        }
+      }
+    }
+  }
+}

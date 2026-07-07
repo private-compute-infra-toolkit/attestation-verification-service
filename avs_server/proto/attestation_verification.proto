@@ -63,6 +63,11 @@ enum PolicyHint {
   EZ_ENFORCER_CB_CERTIFICATE = 2;
   EZ_TSM_CB_FRONTEND_CERTIFICATE = 3;
   PROBER_CB_CERTIFICATE = 4;
+  // Only for test environments when `include_development_policy` is set,
+  // otherwise requesting these will result in failure.
+  DEVELOPMENT_CB_CERTIFICATE = 5;
+  DEVELOPMENT_MTLS_CB_CERTIFICATE = 6;
+  DEVELOPMENT_TLS_CB_CERTIFICATE = 7;
 }
 
 message CertifyAttestationRequest {

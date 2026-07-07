@@ -87,6 +87,7 @@ rust_binary(
 
 rust_test(
     name = "avs_server_lib_test",
+    size = "small",
     srcs = ["tests/avs_server_lib_test.rs"],
     compile_data = ["//avs_server/testdata:test_data"],
     proc_macro_deps = [
@@ -121,11 +122,13 @@ rust_test(
 
 rust_test(
     name = "avs_server_lib_unit_test",
+    size = "small",
     crate = ":avs_server_lib",
 )
 
 rust_test(
     name = "c2sp_policy_test",
+    size = "small",
     srcs = ["tests/c2sp_policy_test.rs"],
     compile_data = ["src/c2sp_policy.txt"],
     deps = [

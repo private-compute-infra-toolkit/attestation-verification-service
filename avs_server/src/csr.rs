@@ -19,20 +19,25 @@ use std::sync::Arc;
 use crate::ca::KeyPair;
 use anyhow::Context;
 use avs_proto_rust::avs::{OperatorInfo, PolicyHint};
+#[cfg(not(feature = "enforce_policy"))]
+use oak_attestation_verification::decode_event_proto;
 use oak_attestation_verification::{
-    decode_event_proto, results::get_user_data_payload, AmdSevSnpPolicy,
-    AmdSevSnpTransparentDiceAttestationVerifier, FirmwarePolicy, TransparentLayer1Policy,
-    TransparentLayer2Policy, TransparentStage0Policy,
+    results::get_user_data_payload, AmdSevSnpPolicy, AmdSevSnpTransparentDiceAttestationVerifier,
+    FirmwarePolicy, TransparentLayer1Policy, TransparentLayer2Policy, TransparentStage0Policy,
 };
 use oak_attestation_verification_types::verifier::AttestationVerifier;
+use oak_proto_rust::oak::attestation::v1::{
+    attestation_results::Status, AttestationResults, BinaryReferenceValue,
+    CbLayer1TransparentReferenceValues, CbLayer2TransparentReferenceValues, Endorsements, Evidence,
+    KernelLayerReferenceValues,
+};
+#[cfg(not(feature = "enforce_policy"))]
 use oak_proto_rust::oak::{
     attestation::v1::{
-        attestation_results::Status, binary_reference_value, kernel_binary_reference_value,
-        mpm_reference_value, text_reference_value, AttestationResults, BinaryReferenceValue,
-        CbLayer1TransparentEvent, CbLayer1TransparentReferenceValues, CbLayer2TransparentEvent,
-        CbLayer2TransparentReferenceValues, Digests, Endorsements, Evidence,
-        KernelBinaryReferenceValue, KernelDigests, KernelLayerReferenceValues, MpmReferenceValue,
-        MpmVersionIds, SkipVerification, Stage0TransparentMeasurements, TextReferenceValue,
+        binary_reference_value, kernel_binary_reference_value, mpm_reference_value,
+        text_reference_value, CbLayer1TransparentEvent, CbLayer2TransparentEvent, Digests,
+        KernelBinaryReferenceValue, KernelDigests, MpmReferenceValue, MpmVersionIds,
+        SkipVerification, Stage0TransparentMeasurements, TextReferenceValue,
     },
     RawDigest,
 };
@@ -54,9 +59,14 @@ impl From<PolicyHint> for ConnectionMode {
         match hint {
             PolicyHint::Unspecified
             | PolicyHint::PrivateArateaFrontendCbCertificate
-            | PolicyHint::ProberCbCertificate => ConnectionMode::Unrestricted,
-            PolicyHint::EzEnforcerCbCertificate => ConnectionMode::Mtls,
-            PolicyHint::EzTsmCbFrontendCertificate => ConnectionMode::Tls,
+            | PolicyHint::ProberCbCertificate
+            | PolicyHint::DevelopmentCbCertificate => ConnectionMode::Unrestricted,
+            PolicyHint::EzEnforcerCbCertificate | PolicyHint::DevelopmentMtlsCbCertificate => {
+                ConnectionMode::Mtls
+            }
+            PolicyHint::EzTsmCbFrontendCertificate | PolicyHint::DevelopmentTlsCbCertificate => {
+                ConnectionMode::Tls
+            }
         }
     }
 }
@@ -149,6 +159,7 @@ pub(crate) fn validate_csr_request(
     nonce: Option<&[u8]>,
     policy_hint: i32,
     operator_info: &OperatorInfo,
+    policies_config: &policies::PoliciesConfig,
 ) -> anyhow::Result<ProvisionedIdentity> {
     use oak_proto_rust::oak::attestation::v1::reference_values;
 
@@ -156,8 +167,8 @@ pub(crate) fn validate_csr_request(
 
     let hint = PolicyHint::try_from(policy_hint)
         .map_err(|_| anyhow::anyhow!("unrecognized policy_hint value: {}", policy_hint))?;
-    let policy =
-        policies::get_policy(hint).context("looking up policy for the given policy_hint")?;
+    let policy = policies::get_policy_with_config(hint, policies_config)
+        .context("looking up policy for the given policy_hint")?;
 
     let oak_ref_values =
         policy.oak_reference_values.as_ref().context("policy is missing oak_reference_values")?;
@@ -210,6 +221,7 @@ pub(crate) fn validate_csr_request(
 ///
 /// TODO: b/515710997 - Remove this function once all attestation measurements
 /// are properly endorsed.
+#[cfg(not(feature = "enforce_policy"))]
 pub(crate) fn always_certify_request(
     csr_der: &[u8],
     evidence: &Evidence,
@@ -217,6 +229,7 @@ pub(crate) fn always_certify_request(
     nonce: Option<&[u8]>,
     policy_hint: i32,
     operator_info: &OperatorInfo,
+    policies_config: &policies::PoliciesConfig,
 ) -> anyhow::Result<ProvisionedIdentity> {
     let csr_public_key = verify_csr_and_get_public_key(csr_der)?;
 
@@ -248,9 +261,20 @@ pub(crate) fn always_certify_request(
 
     verify_data_binding(&attestation_results, &csr_public_key, nonce)?;
 
-    let connection_mode: ConnectionMode = PolicyHint::try_from(policy_hint)
-        .map_err(|_| anyhow::anyhow!("unrecognized policy_hint value: {}", policy_hint))?
-        .into();
+    let hint = PolicyHint::try_from(policy_hint)
+        .map_err(|_| anyhow::anyhow!("unrecognized policy_hint value: {}", policy_hint))?;
+
+    if matches!(
+        hint,
+        PolicyHint::DevelopmentCbCertificate
+            | PolicyHint::DevelopmentMtlsCbCertificate
+            | PolicyHint::DevelopmentTlsCbCertificate
+    ) && !policies_config.include_development_policy
+    {
+        anyhow::bail!("policy not supported: {:?}", hint);
+    }
+
+    let connection_mode: ConnectionMode = hint.into();
 
     anyhow::ensure!(
         !operator_info.operator_domain.is_empty(),
@@ -275,6 +299,7 @@ pub(crate) fn always_certify_request(
 }
 
 /// Constructs a `BinaryReferenceValue` containing a single SHA-256 digest.
+#[cfg(not(feature = "enforce_policy"))]
 fn brv_from_digest(sha2_256: &[u8]) -> BinaryReferenceValue {
     BinaryReferenceValue {
         r#type: Some(binary_reference_value::Type::Digests(Digests {
@@ -285,6 +310,7 @@ fn brv_from_digest(sha2_256: &[u8]) -> BinaryReferenceValue {
 
 /// Constructs a `KernelBinaryReferenceValue` containing single SHA-256 digests
 /// for the kernel image and setup data.
+#[cfg(not(feature = "enforce_policy"))]
 fn kernel_brv_from_digest(
     image_sha2_256: &[u8],
     setup_data_sha2_256: &[u8],
@@ -309,6 +335,7 @@ fn kernel_brv_from_digest(
 
 /// Extracts measurement digests from the Evidence's transparent event log
 /// and constructs matching reference values for each transparent policy layer.
+#[cfg(not(feature = "enforce_policy"))]
 fn evidence_to_transparent_reference_values(
     evidence: &Evidence,
 ) -> anyhow::Result<(

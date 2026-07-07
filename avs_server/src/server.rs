@@ -30,11 +30,23 @@ use tonic::{Request, Response, Status};
 pub struct AttestationVerificationService {
     tca_client: Option<Arc<dyn tca_common::TcaClient>>,
     certificate_authority: RwLock<Option<Arc<ca::CertificateAuthority>>>,
+    policies_config: policies::PoliciesConfig,
 }
 
 impl AttestationVerificationService {
     pub fn new(tca_client: Option<Arc<dyn tca_common::TcaClient>>) -> Self {
-        Self { tca_client, certificate_authority: RwLock::new(None) }
+        Self {
+            tca_client,
+            certificate_authority: RwLock::new(None),
+            policies_config: policies::PoliciesConfig::default(),
+        }
+    }
+
+    pub fn new_with_policies_config(
+        tca_client: Option<Arc<dyn tca_common::TcaClient>>,
+        policies_config: policies::PoliciesConfig,
+    ) -> Self {
+        Self { tca_client, certificate_authority: RwLock::new(None), policies_config }
     }
 
     /// Returns the DER-encoded CA certificate chain, if the certificate
@@ -80,6 +92,7 @@ impl AttestationVerification for AttestationVerificationService {
             None,
             req.policy_hint,
             operator_info,
+            &self.policies_config,
         )
         .map_err(|e| Status::new(tonic::Code::FailedPrecondition, format!("{e:?}")))?;
         #[cfg(not(feature = "enforce_policy"))]
@@ -90,6 +103,7 @@ impl AttestationVerification for AttestationVerificationService {
             None,
             req.policy_hint,
             operator_info,
+            &self.policies_config,
         )
         .map_err(|e| Status::new(tonic::Code::FailedPrecondition, format!("{e:?}")))?;
         let cert = certificate_authority.generate_certificate(&identity).map_err(|e| {
@@ -120,6 +134,7 @@ impl AttestationVerification for AttestationVerificationService {
             .clone();
 
         let mut stream = request.into_inner();
+        let policies_config = self.policies_config.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(1);
 
         tokio::spawn(async move {
@@ -213,6 +228,7 @@ impl AttestationVerification for AttestationVerificationService {
                 Some(&nonce),
                 certify_request.policy_hint,
                 &operator_info,
+                &policies_config,
             ) {
                 Ok(identity) => match certificate_authority.generate_certificate(&identity) {
                     Ok(cert) => {
@@ -250,6 +266,7 @@ impl AttestationVerification for AttestationVerificationService {
                 Some(&nonce),
                 certify_request.policy_hint,
                 &operator_info,
+                &policies_config,
             ) {
                 Ok(identity) => match certificate_authority.generate_certificate(&identity) {
                     Ok(cert) => {

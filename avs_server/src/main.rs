@@ -66,7 +66,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let attestation_verification_service = AttestationVerificationService::new(tca_client);
+    let policies_config = avs_server_lib::policies::PoliciesConfig {
+        include_development_policy: config.include_development_policy,
+    };
+    let attestation_verification_service =
+        AttestationVerificationService::new_with_policies_config(tca_client, policies_config);
     info!("AVS: AttestationVerificationService created.");
 
     info!("AVS: Building gRPC server...");

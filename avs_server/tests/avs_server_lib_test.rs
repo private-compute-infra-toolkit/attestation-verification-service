@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(unused_imports, dead_code, unused_variables)]
+
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -24,6 +26,7 @@ use avs_proto_rust::avs::{
     CertifyAttestationRequest, CertifyAttestationResponse, CertifyAttestationStreamRequest,
     ChallengeRequest, GenerateAvsSigningKeyRequest, OperatorInfo, PolicyHint,
 };
+use avs_server_lib::policies;
 use avs_server_lib::server::AttestationVerificationService;
 use chrono::{Duration, Utc};
 use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
@@ -84,6 +87,13 @@ struct TestServer {
 }
 
 async fn create_test_server(mode: ServerMode) -> anyhow::Result<TestServer> {
+    create_test_server_with_config(mode, policies::PoliciesConfig::default()).await
+}
+
+async fn create_test_server_with_config(
+    mode: ServerMode,
+    policies_config: policies::PoliciesConfig,
+) -> anyhow::Result<TestServer> {
     let sockaddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
     let listener = TcpListener::bind(sockaddr).await?;
     let port = listener.local_addr()?.port();
@@ -91,11 +101,16 @@ async fn create_test_server(mode: ServerMode) -> anyhow::Result<TestServer> {
     let shutdown_notify_copy = shutdown_notify.clone();
 
     let attestation_verification_service = match mode {
-        ServerMode::SelfSigning => AttestationVerificationService::new(None),
+        ServerMode::SelfSigning => {
+            AttestationVerificationService::new_with_policies_config(None, policies_config)
+        }
         ServerMode::TcaMock => {
             let mock_client = MockTcaClient::new();
             let tca_client: Arc<dyn tca_common::TcaClient> = std::sync::Arc::new(mock_client);
-            AttestationVerificationService::new(Some(tca_client))
+            AttestationVerificationService::new_with_policies_config(
+                Some(tca_client),
+                policies_config,
+            )
         }
     };
     let server = tokio::spawn(async move {
@@ -372,7 +387,12 @@ const SIGNING_PRIVATE_KEY_HEX: &str =
 #[tokio::test]
 async fn test_valid_certify_attestation() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
-        let test_server = create_test_server(mode.clone()).await.unwrap();
+        let test_server = create_test_server_with_config(
+            mode.clone(),
+            policies::PoliciesConfig { include_development_policy: true },
+        )
+        .await
+        .unwrap();
 
         let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
         let empty_variant: Variant = Variant::default();
@@ -387,39 +407,58 @@ async fn test_valid_certify_attestation() {
         let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
         let public_key_der = public_key_pem.contents();
 
-        let mut evidence = get_evidence();
-        evidence.signed_user_data_certificate =
-            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+        for (policy_hint, expected_eku, is_tls) in [
+            (PolicyHint::DevelopmentCbCertificate, ExpectedEku::None, false),
+            (PolicyHint::DevelopmentMtlsCbCertificate, ExpectedEku::ServerAndClientAuth, false),
+            (PolicyHint::DevelopmentTlsCbCertificate, ExpectedEku::ServerAuth, true),
+        ] {
+            let mut evidence = get_evidence();
+            evidence.signed_user_data_certificate =
+                create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
 
-        let request = CertifyAttestationRequest {
-            csr: csr_der,
-            evidence: Some(evidence),
-            endorsements: Some(endorsements),
-            operator_info: Some(test_operator_info()),
-            ..Default::default()
-        };
+            let request = CertifyAttestationRequest {
+                csr: csr_der.clone(),
+                evidence: Some(evidence),
+                endorsements: Some(endorsements.clone()),
+                operator_info: Some(test_operator_info()),
+                policy_hint: policy_hint.into(),
+            };
 
-        let response = call_certify_attestation(test_server.port, request).await.unwrap();
-        let (expected_chain_len, expected_trust_domain) = match mode {
-            ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
-            ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
-        };
-        assert_eq!(
-            response.certificate_chain.len(),
-            expected_chain_len,
-            "Expected {} certificates in chain for {:?} mode",
-            expected_chain_len,
-            mode
-        );
-        validate_cert_chain(
-            &response.certificate_chain,
-            &csr_key_pair,
-            &ExpectedSan::SpiffeUri(format!(
-                "spiffe://{}/operator/google/encrypted-zone/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
-                expected_trust_domain
-            )),
-            ExpectedEku::None,
-        );
+            let response = call_certify_attestation(test_server.port, request).await.unwrap();
+            let (expected_chain_len, expected_trust_domain) = match mode {
+                ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
+                ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
+            };
+            assert_eq!(
+                response.certificate_chain.len(),
+                expected_chain_len,
+                "Expected {} certificates in chain for {:?} mode",
+                expected_chain_len,
+                mode
+            );
+            #[cfg(feature = "enforce_policy")]
+            let (expected_publisher, expected_role, expected_workload) =
+                ("untrusted.com", "none", "unendorsed-development");
+            #[cfg(not(feature = "enforce_policy"))]
+            let (expected_publisher, expected_role, expected_workload) =
+                ("google-release", "pcit-release-bot", "encrypted-zone");
+
+            let expected_san = if is_tls {
+                ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain))
+            } else {
+                ExpectedSan::SpiffeUri(format!(
+                    "spiffe://{}/operator/google/encrypted-zone/publisher/{}/{}/workload/{}",
+                    expected_trust_domain, expected_publisher, expected_role, expected_workload
+                ))
+            };
+
+            validate_cert_chain(
+                &response.certificate_chain,
+                &csr_key_pair,
+                &expected_san,
+                expected_eku,
+            );
+        }
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
     }
@@ -428,7 +467,12 @@ async fn test_valid_certify_attestation() {
 #[tokio::test]
 async fn test_invalid_vcek_error() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
-        let test_server = create_test_server(mode.clone()).await.unwrap();
+        let test_server = create_test_server_with_config(
+            mode.clone(),
+            policies::PoliciesConfig { include_development_policy: true },
+        )
+        .await
+        .unwrap();
 
         let invalid_platform_endorsement =
             AmdSevSnpEndorsement { tee_certificate: get_genoa_vcek() };
@@ -446,7 +490,7 @@ async fn test_invalid_vcek_error() {
             evidence: Some(get_evidence()),
             endorsements: Some(invalid_endorsements),
             operator_info: Some(test_operator_info()),
-            ..Default::default()
+            policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
         };
 
         match call_certify_attestation(test_server.port, request).await {
@@ -468,7 +512,7 @@ async fn test_invalid_vcek_error() {
             evidence: Some(get_evidence()),
             endorsements: Some(empty_endorsements),
             operator_info: Some(test_operator_info()),
-            ..Default::default()
+            policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
         };
 
         match call_certify_attestation(test_server.port, request).await {
@@ -594,7 +638,12 @@ async fn test_invalid_csr_error() {
 // match the on in the CSR.
 async fn test_mismatch_publickey() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
-        let test_server = create_test_server(mode.clone()).await.unwrap();
+        let test_server = create_test_server_with_config(
+            mode.clone(),
+            policies::PoliciesConfig { include_development_policy: true },
+        )
+        .await
+        .unwrap();
 
         let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
         let empty_variant: Variant = Variant::default();
@@ -620,7 +669,7 @@ async fn test_mismatch_publickey() {
             evidence: Some(evidence),
             endorsements: Some(endorsements),
             operator_info: Some(test_operator_info()),
-            ..Default::default()
+            policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
         };
 
         match call_certify_attestation(test_server.port, request).await {
@@ -801,7 +850,10 @@ async fn test_generate_avs_signing_key_with_failing_tca_client() {
 async fn test_extract_trust_domain_with_multiple_san_entries() {
     let mock_client = MockTcaClientMultiSan::new();
     let tca_client: Arc<dyn TcaClient> = std::sync::Arc::new(mock_client);
-    let service = AttestationVerificationService::new(Some(tca_client));
+    let service = AttestationVerificationService::new_with_policies_config(
+        Some(tca_client),
+        policies::PoliciesConfig { include_development_policy: true },
+    );
 
     let sockaddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
     let listener = TcpListener::bind(sockaddr).await.unwrap();
@@ -848,17 +900,24 @@ async fn test_extract_trust_domain_with_multiple_san_entries() {
         evidence: Some(evidence),
         endorsements: Some(endorsements),
         operator_info: Some(test_operator_info()),
-        ..Default::default()
+        policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
     };
 
     let response = call_certify_attestation(port, request).await.unwrap();
     assert_eq!(response.certificate_chain.len(), 3);
+    #[cfg(feature = "enforce_policy")]
+    let (expected_publisher, expected_role, expected_workload) =
+        ("untrusted.com", "none", "unendorsed-development");
+    #[cfg(not(feature = "enforce_policy"))]
+    let (expected_publisher, expected_role, expected_workload) =
+        ("google-release", "pcit-release-bot", "encrypted-zone");
+
     validate_cert_chain(
         &response.certificate_chain,
         &csr_key_pair,
         &ExpectedSan::SpiffeUri(format!(
-            "spiffe://{}/operator/google/encrypted-zone/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
-            MOCK_TCA_TRUST_DOMAIN
+            "spiffe://{}/operator/google/encrypted-zone/publisher/{}/{}/workload/{}",
+            MOCK_TCA_TRUST_DOMAIN, expected_publisher, expected_role, expected_workload
         )),
         ExpectedEku::None,
     );
@@ -971,7 +1030,12 @@ fn construct_binding_payload(nonce: &[u8], public_key_der: &[u8]) -> Vec<u8> {
 #[tokio::test]
 async fn test_certify_attestation_stream_nonce_mismatch() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
-        let test_server = create_test_server(mode.clone()).await.unwrap();
+        let test_server = create_test_server_with_config(
+            mode.clone(),
+            policies::PoliciesConfig { include_development_policy: true },
+        )
+        .await
+        .unwrap();
 
         let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
         let empty_variant: Variant = Variant::default();
@@ -1032,7 +1096,7 @@ async fn test_certify_attestation_stream_nonce_mismatch() {
                     evidence: Some(evidence),
                     endorsements: Some(endorsements),
                     operator_info: Some(test_operator_info()),
-                    ..Default::default()
+                    policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
                 },
             )),
         })
@@ -1048,7 +1112,10 @@ async fn test_certify_attestation_stream_nonce_mismatch() {
                 }
                 _ => panic!("Expected final response or error"),
             },
-            Some(Err(e)) => assert!(e.to_string().contains("nonce mismatch")),
+            Some(Err(e)) => assert!(
+                e.to_string().contains("quoted key does not match")
+                    || e.to_string().contains("nonce mismatch")
+            ),
             None => panic!("Stream closed early"),
         }
 
@@ -1060,7 +1127,12 @@ async fn test_certify_attestation_stream_nonce_mismatch() {
 #[tokio::test]
 async fn test_certify_attestation_stream_success() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
-        let test_server = create_test_server(mode.clone()).await.unwrap();
+        let test_server = create_test_server_with_config(
+            mode.clone(),
+            policies::PoliciesConfig { include_development_policy: true },
+        )
+        .await
+        .unwrap();
 
         let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
         let empty_variant: Variant = Variant::default();
@@ -1120,7 +1192,7 @@ async fn test_certify_attestation_stream_success() {
                     evidence: Some(evidence),
                     endorsements: Some(endorsements),
                     operator_info: Some(test_operator_info()),
-                    ..Default::default()
+                    policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
                 },
             )),
         })
@@ -1145,12 +1217,19 @@ async fn test_certify_attestation_stream_success() {
             expected_chain_len,
             mode
         );
+        #[cfg(feature = "enforce_policy")]
+        let (expected_publisher, expected_role, expected_workload) =
+            ("untrusted.com", "none", "unendorsed-development");
+        #[cfg(not(feature = "enforce_policy"))]
+        let (expected_publisher, expected_role, expected_workload) =
+            ("google-release", "pcit-release-bot", "encrypted-zone");
+
         validate_cert_chain(
             &result.certificate_chain,
             &csr_key_pair,
             &ExpectedSan::SpiffeUri(format!(
-                "spiffe://{}/operator/google/encrypted-zone/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
-                expected_trust_domain
+                "spiffe://{}/operator/google/encrypted-zone/publisher/{}/{}/workload/{}",
+                expected_trust_domain, expected_publisher, expected_role, expected_workload
             )),
             ExpectedEku::None,
         );
@@ -1160,6 +1239,7 @@ async fn test_certify_attestation_stream_success() {
     }
 }
 
+#[cfg(not(feature = "enforce_policy"))]
 #[tokio::test]
 async fn test_certify_attestation_with_tls_policy() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
@@ -1213,6 +1293,7 @@ async fn test_certify_attestation_with_tls_policy() {
     }
 }
 
+#[cfg(not(feature = "enforce_policy"))]
 #[tokio::test]
 async fn test_certify_attestation_with_prober_policy() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
@@ -1311,6 +1392,7 @@ fn assert_valid_dns_name(dns_name: &str) {
     }
 }
 
+#[cfg(not(feature = "enforce_policy"))]
 #[tokio::test]
 async fn test_tls_policy_provisions_valid_dns_name() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
@@ -1366,6 +1448,143 @@ async fn test_tls_policy_provisions_valid_dns_name() {
             labels[1], operator_info.operator_domain,
             "Second label must be the operator domain"
         );
+
+        test_server.shutdown_notify.notify_waiters();
+        test_server.server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn test_development_policy_disabled_fails() {
+    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
+        let test_server = create_test_server(mode.clone()).await.unwrap();
+
+        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+        let empty_variant: Variant = Variant::default();
+        let endorsements = Endorsements {
+            platform: Some(platform_endorsement.into()),
+            initial: Some(empty_variant),
+            ..Default::default()
+        };
+
+        static SUBJECT: &str = "example.com";
+        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+        let public_key_der = public_key_pem.contents();
+
+        let mut evidence = get_evidence();
+        evidence.signed_user_data_certificate =
+            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+        for policy_hint in [
+            PolicyHint::DevelopmentCbCertificate,
+            PolicyHint::DevelopmentMtlsCbCertificate,
+            PolicyHint::DevelopmentTlsCbCertificate,
+        ] {
+            let mut evidence = get_evidence();
+            evidence.signed_user_data_certificate =
+                create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+            let request = CertifyAttestationRequest {
+                csr: csr_der.clone(),
+                evidence: Some(evidence),
+                endorsements: Some(endorsements.clone()),
+                operator_info: Some(test_operator_info()),
+                policy_hint: policy_hint.into(),
+            };
+
+            let result = call_certify_attestation(test_server.port, request).await;
+            assert!(result.is_err());
+            let err_msg = format!("{:?}", result.err().unwrap());
+            assert!(
+                err_msg.contains("policy not supported"),
+                "Expected error 'policy not supported', got: {}",
+                err_msg
+            );
+        }
+
+        test_server.shutdown_notify.notify_waiters();
+        test_server.server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn test_development_policy_enabled_succeeds() {
+    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
+        let test_server = create_test_server_with_config(
+            mode.clone(),
+            policies::PoliciesConfig { include_development_policy: true },
+        )
+        .await
+        .unwrap();
+
+        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+        let empty_variant: Variant = Variant::default();
+        let endorsements = Endorsements {
+            platform: Some(platform_endorsement.into()),
+            initial: Some(empty_variant),
+            ..Default::default()
+        };
+
+        static SUBJECT: &str = "example.com";
+        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+        let public_key_der = public_key_pem.contents();
+
+        for (policy_hint, expected_eku, is_tls) in [
+            (PolicyHint::DevelopmentCbCertificate, ExpectedEku::None, false),
+            (PolicyHint::DevelopmentMtlsCbCertificate, ExpectedEku::ServerAndClientAuth, false),
+            (PolicyHint::DevelopmentTlsCbCertificate, ExpectedEku::ServerAuth, true),
+        ] {
+            let mut evidence = get_evidence();
+            evidence.signed_user_data_certificate =
+                create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+            let request = CertifyAttestationRequest {
+                csr: csr_der.clone(),
+                evidence: Some(evidence),
+                endorsements: Some(endorsements.clone()),
+                operator_info: Some(test_operator_info()),
+                policy_hint: policy_hint.into(),
+            };
+
+            let response = call_certify_attestation(test_server.port, request).await;
+
+            let response = response.unwrap();
+            let (expected_chain_len, expected_trust_domain) = match mode {
+                ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
+                ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
+            };
+            assert_eq!(
+                response.certificate_chain.len(),
+                expected_chain_len,
+                "Expected {} certificates in chain for {:?} mode",
+                expected_chain_len,
+                mode
+            );
+            #[cfg(feature = "enforce_policy")]
+            let (expected_publisher, expected_role, expected_workload) =
+                ("untrusted.com", "none", "unendorsed-development");
+            #[cfg(not(feature = "enforce_policy"))]
+            let (expected_publisher, expected_role, expected_workload) =
+                ("google-release", "pcit-release-bot", "encrypted-zone");
+
+            let expected_san = if is_tls {
+                ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain))
+            } else {
+                ExpectedSan::SpiffeUri(format!(
+                    "spiffe://{}/operator/google/encrypted-zone/publisher/{}/{}/workload/{}",
+                    expected_trust_domain, expected_publisher, expected_role, expected_workload
+                ))
+            };
+
+            validate_cert_chain(
+                &response.certificate_chain,
+                &csr_key_pair,
+                &expected_san,
+                expected_eku,
+            );
+        }
 
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();

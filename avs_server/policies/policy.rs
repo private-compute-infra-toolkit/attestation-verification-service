@@ -22,9 +22,23 @@ mod pes;
 const PRIVATE_ARATEA_SERVER_POLICY: &[u8] = include_bytes!("private_aratea_server/policy.binarypb");
 const ENCRYPTED_ZONE_POLICY: &[u8] = include_bytes!("encrypted_zone/policy.binarypb");
 const PROBER_POLICY: &[u8] = include_bytes!("prober/policy.binarypb");
+// Only available if PoliciesConfig's `include_development_policy` flag is set.
+const DEVELOPMENT_POLICY: &[u8] = include_bytes!("development/policy.binarypb");
+
+/// Configuration options for looking up and validating policies.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PoliciesConfig {
+    pub include_development_policy: bool,
+}
 
 /// Returns the `Policy` associated with the given `PolicyHint`.
 pub fn get_policy(hint: PolicyHint) -> anyhow::Result<Policy> {
+    get_policy_with_config(hint, &PoliciesConfig::default())
+}
+
+/// Returns the `Policy` associated with the given `PolicyHint` and
+/// configuration options.
+pub fn get_policy_with_config(hint: PolicyHint, config: &PoliciesConfig) -> anyhow::Result<Policy> {
     let policy_bytes = match hint {
         PolicyHint::Unspecified => {
             anyhow::bail!("cannot fetch policy for POLICY_HINT_UNSPECIFIED")
@@ -34,6 +48,14 @@ pub fn get_policy(hint: PolicyHint) -> anyhow::Result<Policy> {
             ENCRYPTED_ZONE_POLICY
         }
         PolicyHint::ProberCbCertificate => PROBER_POLICY,
+        PolicyHint::DevelopmentCbCertificate
+        | PolicyHint::DevelopmentMtlsCbCertificate
+        | PolicyHint::DevelopmentTlsCbCertificate => {
+            if !config.include_development_policy {
+                anyhow::bail!("policy not supported: {:?}", hint);
+            }
+            DEVELOPMENT_POLICY
+        }
     };
     let mut policy = Policy::decode(policy_bytes)
         .map_err(|e| anyhow::anyhow!("failed to decode policy: {}", e))?;
@@ -90,5 +112,37 @@ mod tests {
         let policy = get_policy(PolicyHint::ProberCbCertificate).expect("failed to get policy");
         assert_eq!(policy.workload_name, "attestation-verification-service-prober");
         assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_development_cb_returns_error() {
+        for hint in [
+            PolicyHint::DevelopmentCbCertificate,
+            PolicyHint::DevelopmentMtlsCbCertificate,
+            PolicyHint::DevelopmentTlsCbCertificate,
+        ] {
+            let result =
+                get_policy_with_config(hint, &PoliciesConfig { include_development_policy: false });
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                format!("policy not supported: {:?}", hint)
+            );
+        }
+    }
+
+    #[test]
+    fn get_policy_development_cb_enabled_returns_valid_policy() {
+        for hint in [
+            PolicyHint::DevelopmentCbCertificate,
+            PolicyHint::DevelopmentMtlsCbCertificate,
+            PolicyHint::DevelopmentTlsCbCertificate,
+        ] {
+            let policy =
+                get_policy_with_config(hint, &PoliciesConfig { include_development_policy: true })
+                    .expect("failed to get policy");
+            assert_eq!(policy.workload_name, "unendorsed-development");
+            assert!(policy.oak_reference_values.is_some());
+        }
     }
 }

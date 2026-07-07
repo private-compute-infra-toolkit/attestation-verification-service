@@ -24,12 +24,18 @@ fn default_tca_endpoint() -> String {
     "http://10.0.2.100:8008".to_string()
 }
 
+fn default_include_development_policy() -> bool {
+    false
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
     #[serde(default = "default_use_self_signed_cert")]
     pub use_self_signed_cert: bool,
     #[serde(default = "default_tca_endpoint")]
     pub tca_endpoint: String,
+    #[serde(default = "default_include_development_policy")]
+    pub include_development_policy: bool,
 }
 
 impl Default for AppConfig {
@@ -37,6 +43,7 @@ impl Default for AppConfig {
         Self {
             use_self_signed_cert: default_use_self_signed_cert(),
             tca_endpoint: default_tca_endpoint(),
+            include_development_policy: default_include_development_policy(),
         }
     }
 }
@@ -51,14 +58,16 @@ mod tests {
         let config: AppConfig = serde_json::from_str(json_str).unwrap();
         assert!(!config.use_self_signed_cert);
         assert_eq!(config.tca_endpoint, "http://10.0.2.100:8008");
+        assert!(!config.include_development_policy);
     }
 
     #[test]
     fn test_custom_values_applied() {
-        let json_str = r#"{"use_self_signed_cert": true, "tca_endpoint": "http://example.com"}"#;
+        let json_str = r#"{"use_self_signed_cert": true, "tca_endpoint": "http://example.com", "include_development_policy": true}"#;
         let config: AppConfig = serde_json::from_str(json_str).unwrap();
         assert!(config.use_self_signed_cert);
         assert_eq!(config.tca_endpoint, "http://example.com");
+        assert!(config.include_development_policy);
     }
 
     #[test]

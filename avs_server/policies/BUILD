@@ -29,6 +29,7 @@ rust_library(
         "//avs_server/policies/private_aratea_server:policy_binarypb",
         "//avs_server/policies/encrypted_zone:policy_binarypb",
         "//avs_server/policies/prober:policy_binarypb",
+        "//avs_server/policies/development:policy_binarypb",
     ],
     crate_root = "policy.rs",
     deps = [
@@ -44,6 +45,7 @@ rust_library(
 
 rust_test(
     name = "policies_test",
+    size = "small",
     crate = ":policies",
     deps = [
         "@oak_crates_index//:tempfile",
