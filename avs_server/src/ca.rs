@@ -38,50 +38,41 @@ pub(crate) struct CertificateAuthority {
     trust_domain: String,
 }
 
-// Struct for encapulating the X509_name_st type to make it async friendly.
-struct SendNamePtr(*mut bssl_sys::X509_name_st);
-// Safety: The X509_NAME pointer is only accessed by a single task at a time.
-unsafe impl Send for SendNamePtr {}
-
-impl SendNamePtr {
-    fn as_ptr(&self) -> *mut bssl_sys::X509_name_st {
-        self.0
-    }
-}
-
 // TODO: encapsulate x509 with a rust struct
 // and implement Drop train similar to what is done for `KeyPair`
 // to make cleanup logic easier.
 impl CertificateAuthority {
     pub(crate) async fn new_intermediate(tca_client: Arc<dyn TcaClient>) -> anyhow::Result<Self> {
-        // Generate the keypair and CSR in a sync block. The issuer_name_ptr
-        // is wrapped in SendNamePtr so it can safely cross the `.await`
-        // boundary (raw pointers are not `Send`).
-        let issuer_name_ptr = Self::create_issuer_x509_name(ISSUER_NAME)?;
-        let (ca_key, csr_der, issuer_name) = unsafe {
-            let ca_key = Self::create_ca_keypair()?;
-
-            let csr_der = match Self::create_ca_csr(&ca_key, issuer_name_ptr) {
-                Ok(c) => c,
+        // Generate the keypair and CSR. The locally-constructed subject name
+        // is only needed for the CSR and is freed immediately after.
+        let (ca_key, csr_der) = unsafe {
+            let subject_name_ptr = Self::create_issuer_x509_name(ISSUER_NAME)?;
+            let ca_key = match Self::create_ca_keypair() {
+                Ok(k) => k,
                 Err(e) => {
-                    bssl_sys::X509_NAME_free(issuer_name_ptr);
+                    bssl_sys::X509_NAME_free(subject_name_ptr);
                     return Err(e);
                 }
             };
-            (ca_key, csr_der, SendNamePtr(issuer_name_ptr))
-        };
-
-        let tca_common::CertificateChain(cert_chain) =
-            match tca_client.issue_certificate(tca_common::Csr(csr_der)).await {
-                Ok(chain) => chain,
+            let csr_der = match Self::create_ca_csr(&ca_key, subject_name_ptr) {
+                Ok(c) => {
+                    bssl_sys::X509_NAME_free(subject_name_ptr);
+                    c
+                }
                 Err(e) => {
-                    unsafe { bssl_sys::X509_NAME_free(issuer_name.as_ptr()) };
-                    return Err(anyhow::Error::new(e));
+                    bssl_sys::X509_NAME_free(subject_name_ptr);
+                    return Err(e);
                 }
             };
+            (ca_key, csr_der)
+        };
+
+        let tca_common::CertificateChain(cert_chain) = tca_client
+            .issue_certificate(tca_common::Csr(csr_der))
+            .await
+            .map_err(anyhow::Error::new)?;
 
         if cert_chain.is_empty() {
-            unsafe { bssl_sys::X509_NAME_free(issuer_name.as_ptr()) };
             anyhow::bail!("TCA returned empty certificate chain");
         }
 
@@ -97,9 +88,16 @@ impl CertificateAuthority {
         let trust_domain = Self::extract_trust_domain_from_cert(&ca_cert_chain_der[0])?;
         info!("Extracted trust domain from TCA-issued certificate: {}", trust_domain);
 
+        // Use the Subject DN from the TCA-issued certificate as the issuer
+        // name for leaf certs. Per RFC 5280 4.1.2.4, the leaf certificate's
+        // Issuer DN must exactly match the signing CA certificate's Subject DN.
+        let issuer_name_ptr = Self::extract_subject_name_from_cert(&ca_cert_chain_der[0])?;
+
         Ok(Self {
+            // Encapsulate `ca_key` and `issuer_name_ptr` in mutexes so they can be
+            // safely moved across async boundaries.
             ca_key: Mutex::new(ca_key),
-            issuer_name: Mutex::new(issuer_name.as_ptr()),
+            issuer_name: Mutex::new(issuer_name_ptr),
             ca_cert_chain_der,
             trust_domain,
         })
@@ -562,6 +560,39 @@ impl CertificateAuthority {
             }
         }
         Ok(())
+    }
+
+    // Parses a DER-encoded certificate and returns a duplicated copy of its
+    // Subject DN. The caller takes ownership and must free the returned
+    // pointer with `X509_NAME_free` when it is no longer needed.
+    fn extract_subject_name_from_cert(
+        cert_der: &[u8],
+    ) -> anyhow::Result<*mut bssl_sys::X509_name_st> {
+        let mut ptr = cert_der.as_ptr();
+        // Safety: ptr and len correctly describe the cert_der slice.
+        let x509 =
+            unsafe { bssl_sys::d2i_X509(std::ptr::null_mut(), &mut ptr, cert_der.len() as i64) };
+        if x509.is_null() {
+            anyhow::bail!("Failed to parse certificate for subject name extraction");
+        }
+
+        // Safety: x509 is a valid, non-null X509 pointer from d2i_X509.
+        let subject_name = unsafe { bssl_sys::X509_get_subject_name(x509) };
+        if subject_name.is_null() {
+            unsafe { bssl_sys::X509_free(x509) };
+            anyhow::bail!("Certificate has no subject name");
+        }
+
+        // Safety: subject_name is valid and owned by x509. X509_NAME_dup
+        // produces an independent copy so x509 can be freed afterwards.
+        let dup = unsafe { bssl_sys::X509_NAME_dup(subject_name) };
+        unsafe { bssl_sys::X509_free(x509) };
+
+        if dup.is_null() {
+            anyhow::bail!("Failed to duplicate subject name");
+        }
+
+        Ok(dup)
     }
 
     // Parses the DER-encoded certificate, extracts the raw SAN extension data,

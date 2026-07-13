@@ -16,7 +16,7 @@ use avs_proto_rust::avs::{Policy, PolicyHint};
 use prost::Message;
 
 mod certs;
-mod pes;
+pub mod pes;
 
 // Embedded policy binaries generated from textproto files at build time.
 const PRIVATE_ARATEA_SERVER_POLICY: &[u8] = include_bytes!("private_aratea_server/policy.binarypb");

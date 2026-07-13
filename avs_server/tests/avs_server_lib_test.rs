@@ -243,12 +243,13 @@ fn validate_cert_chain(
     csr_key_pair: &rcgen::KeyPair,
     expected_san: &ExpectedSan,
     expected_eku: ExpectedEku,
+    expected_issuer: &str,
 ) {
     assert!(!certificate_chain.is_empty(), "Certificate chain must not be empty");
 
     let leaf_cert = x509_cert::Certificate::from_der(&certificate_chain[0]).unwrap();
     let tbs = &leaf_cert.tbs_certificate;
-    assert_eq!(tbs.issuer.to_string(), "CN=Attestation Verification Service");
+    assert_eq!(tbs.issuer.to_string(), expected_issuer);
 
     // Check that the public key in the cert matches the CSR's public key
     // Note that there is a difference in how the two PEMs are formatted. One
@@ -452,11 +453,16 @@ async fn test_valid_certify_attestation() {
                 ))
             };
 
+            let expected_issuer = match mode {
+                ServerMode::SelfSigning => self_signing_issuer_name(),
+                ServerMode::TcaMock => mock_tca_issuer_name(),
+            };
             validate_cert_chain(
                 &response.certificate_chain,
                 &csr_key_pair,
                 &expected_san,
                 expected_eku,
+                &expected_issuer,
             );
         }
         test_server.shutdown_notify.notify_waiters();
@@ -690,6 +696,16 @@ use tca_common::{error::CertificateError, Csr, TcaClient};
 use rcgen::{CertificateParams, Issuer, KeyPair};
 
 const MOCK_TCA_TRUST_DOMAIN: &str = "test.tca.pcit.goog";
+const MOCK_TCA_ORG_NAME: &str = "Mock Org";
+const MOCK_TCA_CN_NAME: &str = "Attestation Verification Service";
+
+fn mock_tca_issuer_name() -> String {
+    format!("O={},CN={}", MOCK_TCA_ORG_NAME, MOCK_TCA_CN_NAME)
+}
+
+fn self_signing_issuer_name() -> String {
+    format!("CN={}", MOCK_TCA_CN_NAME)
+}
 
 struct MockTcaPublicKey {
     key_der: Vec<u8>,
@@ -739,7 +755,8 @@ impl TcaClient for MockTcaClient {
         let ca_issuer = Issuer::new(Self::ca_params(), &*self.root_ca_key);
 
         let mut avs_params = CertificateParams::new(vec![]).unwrap();
-        avs_params.distinguished_name.push(rcgen::DnType::CommonName, "avs");
+        avs_params.distinguished_name.push(rcgen::DnType::OrganizationName, MOCK_TCA_ORG_NAME);
+        avs_params.distinguished_name.push(rcgen::DnType::CommonName, MOCK_TCA_CN_NAME);
         avs_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         avs_params.subject_alt_names = vec![rcgen::SanType::URI(
             format!("spiffe://{}", MOCK_TCA_TRUST_DOMAIN).try_into().unwrap(),
@@ -791,7 +808,10 @@ impl TcaClient for MockTcaClientMultiSan {
         let ca_issuer = Issuer::new(MockTcaClient::ca_params(), &*self.root_ca_key);
 
         let mut avs_params = CertificateParams::new(vec![]).unwrap();
-        avs_params.distinguished_name.push(rcgen::DnType::CommonName, "avs");
+        avs_params.distinguished_name.push(rcgen::DnType::OrganizationName, MOCK_TCA_ORG_NAME);
+        avs_params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Attestation Verification Service");
         avs_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         avs_params.subject_alt_names = vec![
             rcgen::SanType::DnsName("avs.example.com".try_into().unwrap()),
@@ -920,6 +940,7 @@ async fn test_extract_trust_domain_with_multiple_san_entries() {
             MOCK_TCA_TRUST_DOMAIN, expected_publisher, expected_role, expected_workload
         )),
         ExpectedEku::None,
+        &mock_tca_issuer_name(),
     );
 
     shutdown_notify.notify_waiters();
@@ -1224,6 +1245,10 @@ async fn test_certify_attestation_stream_success() {
         let (expected_publisher, expected_role, expected_workload) =
             ("google-release", "pcit-release-bot", "encrypted-zone");
 
+        let expected_issuer = match mode {
+            ServerMode::SelfSigning => self_signing_issuer_name(),
+            ServerMode::TcaMock => mock_tca_issuer_name(),
+        };
         validate_cert_chain(
             &result.certificate_chain,
             &csr_key_pair,
@@ -1232,6 +1257,7 @@ async fn test_certify_attestation_stream_success() {
                 expected_trust_domain, expected_publisher, expected_role, expected_workload
             )),
             ExpectedEku::None,
+            &expected_issuer,
         );
 
         test_server.shutdown_notify.notify_waiters();
@@ -1282,11 +1308,16 @@ async fn test_certify_attestation_with_tls_policy() {
             expected_chain_len,
             mode
         );
+        let expected_issuer = match mode {
+            ServerMode::SelfSigning => self_signing_issuer_name(),
+            ServerMode::TcaMock => mock_tca_issuer_name(),
+        };
         validate_cert_chain(
             &response.certificate_chain,
             &csr_key_pair,
             &ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain)),
             ExpectedEku::ServerAuth,
+            &expected_issuer,
         );
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
@@ -1336,6 +1367,10 @@ async fn test_certify_attestation_with_prober_policy() {
             expected_chain_len,
             mode
         );
+        let expected_issuer = match mode {
+            ServerMode::SelfSigning => self_signing_issuer_name(),
+            ServerMode::TcaMock => mock_tca_issuer_name(),
+        };
         validate_cert_chain(
             &response.certificate_chain,
             &csr_key_pair,
@@ -1344,6 +1379,7 @@ async fn test_certify_attestation_with_prober_policy() {
                 expected_trust_domain
             )),
             ExpectedEku::None,
+            &expected_issuer,
         );
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
@@ -1578,11 +1614,16 @@ async fn test_development_policy_enabled_succeeds() {
                 ))
             };
 
+            let expected_issuer = match mode {
+                ServerMode::SelfSigning => self_signing_issuer_name(),
+                ServerMode::TcaMock => mock_tca_issuer_name(),
+            };
             validate_cert_chain(
                 &response.certificate_chain,
                 &csr_key_pair,
                 &expected_san,
                 expected_eku,
+                &expected_issuer,
             );
         }
 
