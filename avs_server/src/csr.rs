@@ -19,27 +19,15 @@ use std::sync::Arc;
 use crate::ca::KeyPair;
 use anyhow::Context;
 use avs_proto_rust::avs::{OperatorInfo, PolicyHint};
-#[cfg(not(feature = "enforce_policy"))]
-use oak_attestation_verification::decode_event_proto;
 use oak_attestation_verification::{
     results::get_user_data_payload, AmdSevSnpPolicy, AmdSevSnpTransparentDiceAttestationVerifier,
     FirmwarePolicy, TransparentLayer1Policy, TransparentLayer2Policy, TransparentStage0Policy,
 };
 use oak_attestation_verification_types::verifier::AttestationVerifier;
 use oak_proto_rust::oak::attestation::v1::{
-    attestation_results::Status, AttestationResults, BinaryReferenceValue,
-    CbLayer1TransparentReferenceValues, CbLayer2TransparentReferenceValues, Endorsements, Evidence,
-    KernelLayerReferenceValues,
-};
-#[cfg(not(feature = "enforce_policy"))]
-use oak_proto_rust::oak::{
-    attestation::v1::{
-        binary_reference_value, kernel_binary_reference_value, mpm_reference_value,
-        text_reference_value, CbLayer1TransparentEvent, CbLayer2TransparentEvent, Digests,
-        KernelBinaryReferenceValue, KernelDigests, MpmReferenceValue, MpmVersionIds,
-        SkipVerification, Stage0TransparentMeasurements, TextReferenceValue,
-    },
-    RawDigest,
+    attestation_results::Status, AmdSevReferenceValues, AttestationResults, BinaryReferenceValue,
+    CbLayer1TransparentReferenceValues, CbLayer2TransparentReferenceValues,
+    CbTransparentReferenceValues, Endorsements, Evidence, KernelLayerReferenceValues,
 };
 use oak_time_std::clock::SystemTimeClock;
 
@@ -84,10 +72,6 @@ pub(crate) struct ProvisionedIdentity {
     pub(crate) workload_name: String,
 }
 
-use oak_proto_rust::oak::attestation::v1::AmdSevReferenceValues;
-#[cfg(feature = "enforce_policy")]
-use oak_proto_rust::oak::attestation::v1::CbTransparentReferenceValues;
-
 /// Constructs an `AmdSevSnpTransparentDiceAttestationVerifier` from individual
 /// reference value components.
 fn create_transparent_verifier(
@@ -116,7 +100,6 @@ fn create_transparent_verifier(
 /// Extracts individual reference value components from
 /// `CbTransparentReferenceValues` and constructs an
 /// `AmdSevSnpTransparentDiceAttestationVerifier`.
-#[cfg(feature = "enforce_policy")]
 fn create_cbt_verifier(
     cbt_ref_values: &CbTransparentReferenceValues,
 ) -> anyhow::Result<AmdSevSnpTransparentDiceAttestationVerifier> {
@@ -151,7 +134,6 @@ fn create_cbt_verifier(
 /// the policy's `oak_reference_values` field, constructs a verifier, and
 /// verifies the evidence against those reference values. The returned
 /// `ProvisionedIdentity` is populated from the policy's identity fields.
-#[cfg(feature = "enforce_policy")]
 pub(crate) fn validate_csr_request(
     csr_der: &[u8],
     evidence: &Evidence,
@@ -212,200 +194,6 @@ pub(crate) fn validate_csr_request(
         publisher_role: policy.publisher_role,
         workload_name: policy.workload_name,
     })
-}
-
-/// CSR validation that derives reference values from the evidence itself.
-/// Since the measurements in the evidence are used as both the actual and
-/// expected values, verification always succeeds as long as the evidence is
-/// well-formed.
-///
-/// TODO: b/515710997 - Remove this function once all attestation measurements
-/// are properly endorsed.
-#[cfg(not(feature = "enforce_policy"))]
-pub(crate) fn always_certify_request(
-    csr_der: &[u8],
-    evidence: &Evidence,
-    endorsements: &Endorsements,
-    nonce: Option<&[u8]>,
-    policy_hint: i32,
-    operator_info: &OperatorInfo,
-    policies_config: &policies::PoliciesConfig,
-) -> anyhow::Result<ProvisionedIdentity> {
-    let csr_public_key = verify_csr_and_get_public_key(csr_der)?;
-
-    let root_layer = evidence.root_layer.as_ref().context("no root layer in evidence")?;
-    let (amd_sev_ref_values, firmware_ref_values) =
-        AmdSevSnpPolicy::evidence_to_reference_values(root_layer)
-            .context("deriving reference values from evidence")?;
-
-    let (stage0_ref_values, layer1_ref_values, layer2_ref_values) =
-        evidence_to_transparent_reference_values(evidence)
-            .context("extracting transparent reference values from evidence")?;
-
-    let verifier = create_transparent_verifier(
-        &amd_sev_ref_values,
-        &firmware_ref_values,
-        &stage0_ref_values,
-        &layer1_ref_values,
-        &layer2_ref_values,
-    );
-    let attestation_results = verifier.verify(evidence, endorsements)?;
-
-    if attestation_results.status != i32::from(Status::Success) {
-        anyhow::bail!(
-            "attestation verification failed with status {:?}: {}",
-            attestation_results.status,
-            attestation_results.reason
-        );
-    }
-
-    verify_data_binding(&attestation_results, &csr_public_key, nonce)?;
-
-    let hint = PolicyHint::try_from(policy_hint)
-        .map_err(|_| anyhow::anyhow!("unrecognized policy_hint value: {}", policy_hint))?;
-
-    if matches!(
-        hint,
-        PolicyHint::DevelopmentCbCertificate
-            | PolicyHint::DevelopmentMtlsCbCertificate
-            | PolicyHint::DevelopmentTlsCbCertificate
-    ) && !policies_config.include_development_policy
-    {
-        anyhow::bail!("policy not supported: {:?}", hint);
-    }
-
-    let connection_mode: ConnectionMode = hint.into();
-
-    anyhow::ensure!(
-        !operator_info.operator_domain.is_empty(),
-        "operator_domain must be specified in operator_info"
-    );
-    let operator_domain = operator_info.operator_domain.clone();
-    let operator_role = if operator_info.operator_role.is_empty() {
-        "none".to_string()
-    } else {
-        operator_info.operator_role.clone()
-    };
-
-    Ok(ProvisionedIdentity {
-        public_key: csr_public_key,
-        connection_mode,
-        operator_domain,
-        operator_role,
-        publisher_domain: "google-release".to_string(),
-        publisher_role: "pcit-release-bot".to_string(),
-        workload_name: "encrypted-zone".to_string(),
-    })
-}
-
-/// Constructs a `BinaryReferenceValue` containing a single SHA-256 digest.
-#[cfg(not(feature = "enforce_policy"))]
-fn brv_from_digest(sha2_256: &[u8]) -> BinaryReferenceValue {
-    BinaryReferenceValue {
-        r#type: Some(binary_reference_value::Type::Digests(Digests {
-            digests: vec![RawDigest { sha2_256: sha2_256.to_vec(), ..Default::default() }],
-        })),
-    }
-}
-
-/// Constructs a `KernelBinaryReferenceValue` containing single SHA-256 digests
-/// for the kernel image and setup data.
-#[cfg(not(feature = "enforce_policy"))]
-fn kernel_brv_from_digest(
-    image_sha2_256: &[u8],
-    setup_data_sha2_256: &[u8],
-) -> KernelBinaryReferenceValue {
-    KernelBinaryReferenceValue {
-        r#type: Some(kernel_binary_reference_value::Type::Digests(KernelDigests {
-            image: Some(Digests {
-                digests: vec![RawDigest {
-                    sha2_256: image_sha2_256.to_vec(),
-                    ..Default::default()
-                }],
-            }),
-            setup_data: Some(Digests {
-                digests: vec![RawDigest {
-                    sha2_256: setup_data_sha2_256.to_vec(),
-                    ..Default::default()
-                }],
-            }),
-        })),
-    }
-}
-
-/// Extracts measurement digests from the Evidence's transparent event log
-/// and constructs matching reference values for each transparent policy layer.
-#[cfg(not(feature = "enforce_policy"))]
-fn evidence_to_transparent_reference_values(
-    evidence: &Evidence,
-) -> anyhow::Result<(
-    KernelLayerReferenceValues,
-    CbLayer1TransparentReferenceValues,
-    CbLayer2TransparentReferenceValues,
-)> {
-    let event_log =
-        evidence.transparent_event_log.as_ref().context("no transparent event log in evidence")?;
-
-    anyhow::ensure!(
-        event_log.encoded_events.len() >= 3,
-        "expected at least 3 transparent events, found {}",
-        event_log.encoded_events.len()
-    );
-
-    // Event 0: Stage0TransparentMeasurements -> KernelLayerReferenceValues
-    let stage0 = decode_event_proto::<Stage0TransparentMeasurements>(
-        "type.googleapis.com/oak.attestation.v1.Stage0TransparentMeasurements",
-        &event_log.encoded_events[0],
-    )
-    .context("decoding Stage0TransparentMeasurements")?;
-
-    let stage0_ref_values = KernelLayerReferenceValues {
-        kernel: Some(kernel_brv_from_digest(&stage0.kernel_measurement, &stage0.setup_data_digest)),
-        // The transparent form only has a cmdline *digest*, not the raw string.
-        // The compare function requires Skipped when kernel_raw_cmd_line is None.
-        kernel_cmd_line_text: Some(TextReferenceValue {
-            r#type: Some(text_reference_value::Type::Skip(SkipVerification {})),
-        }),
-        init_ram_fs: Some(brv_from_digest(&stage0.ram_disk_digest)),
-        memory_map: Some(brv_from_digest(&stage0.memory_map_digest)),
-        acpi: Some(brv_from_digest(&stage0.acpi_digest)),
-    };
-
-    // Event 1: CbLayer1TransparentEvent -> CbLayer1TransparentReferenceValues
-    let layer1 = decode_event_proto::<CbLayer1TransparentEvent>(
-        "type.googleapis.com/oak.attestation.v1.CbLayer1TransparentEvent",
-        &event_log.encoded_events[1],
-    )
-    .context("decoding CbLayer1TransparentEvent")?;
-
-    #[allow(deprecated)]
-    let layer1_ref_values = CbLayer1TransparentReferenceValues {
-        runtime_agent: Some(brv_from_digest(&layer1.runtime_agent_measurement)),
-        // TODO: b/498607119 - Populate from evidence once runtime_agent_binary_measurement
-        // and userspace_measurement fields are populated.
-        runtime_agent_binary: Some(BinaryReferenceValue {
-            r#type: Some(binary_reference_value::Type::Skip(SkipVerification {})),
-        }),
-        userspace: Some(BinaryReferenceValue {
-            r#type: Some(binary_reference_value::Type::Skip(SkipVerification {})),
-        }),
-    };
-
-    // Event 2: CbLayer2TransparentEvent -> CbLayer2TransparentReferenceValues
-    let layer2 = decode_event_proto::<CbLayer2TransparentEvent>(
-        "type.googleapis.com/oak.attestation.v1.CbLayer2TransparentEvent",
-        &event_log.encoded_events[2],
-    )
-    .context("decoding CbLayer2TransparentEvent")?;
-
-    let binary_mpm = MpmReferenceValue {
-        r#type: Some(mpm_reference_value::Type::Versions(MpmVersionIds {
-            versions: layer2.packages.iter().map(|p| p.mpm_version_id.clone()).collect(),
-        })),
-    };
-    let layer2_ref_values = CbLayer2TransparentReferenceValues { binary_mpm: Some(binary_mpm) };
-
-    Ok((stage0_ref_values, layer1_ref_values, layer2_ref_values))
 }
 
 // Parses length-prefixed user data and returns

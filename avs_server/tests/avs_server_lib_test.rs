@@ -238,6 +238,48 @@ enum ExpectedEku {
     ServerAndClientAuth,
 }
 
+/// Validates that a DNS name conforms to RFC 1123 rules.
+fn assert_valid_dns_name(dns_name: &str) {
+    assert!(!dns_name.is_empty(), "DNS name must not be empty");
+    assert!(
+        dns_name.len() <= 253,
+        "DNS name exceeds 253 characters: {} (len={})",
+        dns_name,
+        dns_name.len()
+    );
+
+    let labels: Vec<&str> = dns_name.split('.').collect();
+    assert!(
+        labels.len() >= 2,
+        "DNS name must have at least 2 labels (got {}): {}",
+        labels.len(),
+        dns_name
+    );
+
+    for (i, label) in labels.iter().enumerate() {
+        assert!(!label.is_empty(), "DNS label at position {} is empty in: {}", i, dns_name);
+        assert!(
+            label.len() <= 63,
+            "DNS label '{}' at position {} exceeds 63 characters (len={})",
+            label,
+            i,
+            label.len()
+        );
+        assert!(
+            label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+            "DNS label '{}' at position {} contains invalid characters (only alphanumeric and hyphens allowed)",
+            label,
+            i
+        );
+        assert!(
+            !label.starts_with('-') && !label.ends_with('-'),
+            "DNS label '{}' at position {} must not start or end with a hyphen",
+            label,
+            i
+        );
+    }
+}
+
 fn validate_cert_chain(
     certificate_chain: &[Vec<u8>],
     csr_key_pair: &rcgen::KeyPair,
@@ -288,7 +330,9 @@ fn validate_cert_chain(
             assert_eq!(get_spiffe_id(&tbs.extensions).unwrap(), *expected_uri);
         }
         ExpectedSan::DnsName(expected_dns) => {
-            assert_eq!(get_dns_name(&tbs.extensions).unwrap(), *expected_dns);
+            let actual_dns = get_dns_name(&tbs.extensions).unwrap();
+            assert_valid_dns_name(&actual_dns);
+            assert_eq!(actual_dns, *expected_dns);
         }
     }
 
@@ -437,12 +481,8 @@ async fn test_valid_certify_attestation() {
                 expected_chain_len,
                 mode
             );
-            #[cfg(feature = "enforce_policy")]
             let (expected_publisher, expected_role, expected_workload) =
                 ("untrusted.com", "none", "unendorsed-development");
-            #[cfg(not(feature = "enforce_policy"))]
-            let (expected_publisher, expected_role, expected_workload) =
-                ("google-release", "pcit-release-bot", "encrypted-zone");
 
             let expected_san = if is_tls {
                 ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain))
@@ -925,12 +965,8 @@ async fn test_extract_trust_domain_with_multiple_san_entries() {
 
     let response = call_certify_attestation(port, request).await.unwrap();
     assert_eq!(response.certificate_chain.len(), 3);
-    #[cfg(feature = "enforce_policy")]
     let (expected_publisher, expected_role, expected_workload) =
         ("untrusted.com", "none", "unendorsed-development");
-    #[cfg(not(feature = "enforce_policy"))]
-    let (expected_publisher, expected_role, expected_workload) =
-        ("google-release", "pcit-release-bot", "encrypted-zone");
 
     validate_cert_chain(
         &response.certificate_chain,
@@ -1238,12 +1274,8 @@ async fn test_certify_attestation_stream_success() {
             expected_chain_len,
             mode
         );
-        #[cfg(feature = "enforce_policy")]
         let (expected_publisher, expected_role, expected_workload) =
             ("untrusted.com", "none", "unendorsed-development");
-        #[cfg(not(feature = "enforce_policy"))]
-        let (expected_publisher, expected_role, expected_workload) =
-            ("google-release", "pcit-release-bot", "encrypted-zone");
 
         let expected_issuer = match mode {
             ServerMode::SelfSigning => self_signing_issuer_name(),
@@ -1258,231 +1290,6 @@ async fn test_certify_attestation_stream_success() {
             )),
             ExpectedEku::None,
             &expected_issuer,
-        );
-
-        test_server.shutdown_notify.notify_waiters();
-        test_server.server.await.unwrap();
-    }
-}
-
-#[cfg(not(feature = "enforce_policy"))]
-#[tokio::test]
-async fn test_certify_attestation_with_tls_policy() {
-    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
-        let test_server = create_test_server(mode.clone()).await.unwrap();
-
-        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
-        let empty_variant: Variant = Variant::default();
-        let endorsements = Endorsements {
-            platform: Some(platform_endorsement.into()),
-            initial: Some(empty_variant),
-            ..Default::default()
-        };
-
-        static SUBJECT: &str = "example.com";
-        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
-        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
-        let public_key_der = public_key_pem.contents();
-
-        let mut evidence = get_evidence();
-        evidence.signed_user_data_certificate =
-            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
-
-        let request = CertifyAttestationRequest {
-            csr: csr_der,
-            evidence: Some(evidence),
-            endorsements: Some(endorsements),
-            operator_info: Some(test_operator_info()),
-            policy_hint: PolicyHint::EzTsmCbFrontendCertificate.into(),
-        };
-
-        let response = call_certify_attestation(test_server.port, request).await.unwrap();
-        let (expected_chain_len, expected_trust_domain) = match mode {
-            ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
-            ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
-        };
-        assert_eq!(
-            response.certificate_chain.len(),
-            expected_chain_len,
-            "Expected {} certificates in chain for {:?} mode",
-            expected_chain_len,
-            mode
-        );
-        let expected_issuer = match mode {
-            ServerMode::SelfSigning => self_signing_issuer_name(),
-            ServerMode::TcaMock => mock_tca_issuer_name(),
-        };
-        validate_cert_chain(
-            &response.certificate_chain,
-            &csr_key_pair,
-            &ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain)),
-            ExpectedEku::ServerAuth,
-            &expected_issuer,
-        );
-        test_server.shutdown_notify.notify_waiters();
-        test_server.server.await.unwrap();
-    }
-}
-
-#[cfg(not(feature = "enforce_policy"))]
-#[tokio::test]
-async fn test_certify_attestation_with_prober_policy() {
-    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
-        let test_server = create_test_server(mode.clone()).await.unwrap();
-
-        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
-        let empty_variant: Variant = Variant::default();
-        let endorsements = Endorsements {
-            platform: Some(platform_endorsement.into()),
-            initial: Some(empty_variant),
-            ..Default::default()
-        };
-
-        static SUBJECT: &str = "example.com";
-        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
-        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
-        let public_key_der = public_key_pem.contents();
-
-        let mut evidence = get_evidence();
-        evidence.signed_user_data_certificate =
-            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
-
-        let request = CertifyAttestationRequest {
-            csr: csr_der,
-            evidence: Some(evidence),
-            endorsements: Some(endorsements),
-            operator_info: Some(test_prober_operator_info()),
-            policy_hint: PolicyHint::ProberCbCertificate.into(),
-        };
-
-        let response = call_certify_attestation(test_server.port, request).await.unwrap();
-        let (expected_chain_len, expected_trust_domain) = match mode {
-            ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
-            ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
-        };
-        assert_eq!(
-            response.certificate_chain.len(),
-            expected_chain_len,
-            "Expected {} certificates in chain for {:?} mode",
-            expected_chain_len,
-            mode
-        );
-        let expected_issuer = match mode {
-            ServerMode::SelfSigning => self_signing_issuer_name(),
-            ServerMode::TcaMock => mock_tca_issuer_name(),
-        };
-        validate_cert_chain(
-            &response.certificate_chain,
-            &csr_key_pair,
-            &ExpectedSan::SpiffeUri(format!(
-                "spiffe://{}/operator/google/prober/publisher/google-release/pcit-release-bot/workload/encrypted-zone",
-                expected_trust_domain
-            )),
-            ExpectedEku::None,
-            &expected_issuer,
-        );
-        test_server.shutdown_notify.notify_waiters();
-        test_server.server.await.unwrap();
-    }
-}
-
-/// Validates that a DNS name conforms to RFC 1123 rules.
-fn assert_valid_dns_name(dns_name: &str) {
-    assert!(!dns_name.is_empty(), "DNS name must not be empty");
-    assert!(
-        dns_name.len() <= 253,
-        "DNS name exceeds 253 characters: {} (len={})",
-        dns_name,
-        dns_name.len()
-    );
-
-    let labels: Vec<&str> = dns_name.split('.').collect();
-    assert!(
-        labels.len() >= 2,
-        "DNS name must have at least 2 labels (got {}): {}",
-        labels.len(),
-        dns_name
-    );
-
-    for (i, label) in labels.iter().enumerate() {
-        assert!(!label.is_empty(), "DNS label at position {} is empty in: {}", i, dns_name);
-        assert!(
-            label.len() <= 63,
-            "DNS label '{}' at position {} exceeds 63 characters (len={})",
-            label,
-            i,
-            label.len()
-        );
-        assert!(
-            label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
-            "DNS label '{}' at position {} contains invalid characters (only alphanumeric and hyphens allowed)",
-            label,
-            i
-        );
-        assert!(
-            !label.starts_with('-') && !label.ends_with('-'),
-            "DNS label '{}' at position {} must not start or end with a hyphen",
-            label,
-            i
-        );
-    }
-}
-
-#[cfg(not(feature = "enforce_policy"))]
-#[tokio::test]
-async fn test_tls_policy_provisions_valid_dns_name() {
-    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
-        let test_server = create_test_server(mode.clone()).await.unwrap();
-
-        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
-        let empty_variant: Variant = Variant::default();
-        let endorsements = Endorsements {
-            platform: Some(platform_endorsement.into()),
-            initial: Some(empty_variant),
-            ..Default::default()
-        };
-
-        static SUBJECT: &str = "example.com";
-        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
-        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
-        let public_key_der = public_key_pem.contents();
-
-        let mut evidence = get_evidence();
-        evidence.signed_user_data_certificate =
-            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
-
-        let request = CertifyAttestationRequest {
-            csr: csr_der,
-            evidence: Some(evidence),
-            endorsements: Some(endorsements),
-            operator_info: Some(test_operator_info()),
-            policy_hint: PolicyHint::EzTsmCbFrontendCertificate.into(),
-        };
-
-        let response = call_certify_attestation(test_server.port, request).await.unwrap();
-        assert!(!response.certificate_chain.is_empty());
-
-        // Extract the DNS name from the leaf certificate's SAN extension.
-        let leaf_cert = x509_cert::Certificate::from_der(&response.certificate_chain[0]).unwrap();
-        let tbs = &leaf_cert.tbs_certificate;
-        let dns_name =
-            get_dns_name(&tbs.extensions).expect("TLS policy certificate must have a DNS SAN");
-
-        // Validate the DNS name is well-formed per RFC 1123.
-        assert_valid_dns_name(&dns_name);
-
-        // Validate the format is <operator_role>.<operator_domain>.<trust_domain>.
-        let labels: Vec<&str> = dns_name.split('.').collect();
-        assert!(
-            labels.len() >= 3,
-            "DNS name must have at least 3 labels (<role>.<domain>.<trust_domain>), got: {}",
-            dns_name
-        );
-        let operator_info = test_operator_info();
-        assert_eq!(labels[0], operator_info.operator_role, "First label must be the operator role");
-        assert_eq!(
-            labels[1], operator_info.operator_domain,
-            "Second label must be the operator domain"
         );
 
         test_server.shutdown_notify.notify_waiters();
@@ -1598,12 +1405,8 @@ async fn test_development_policy_enabled_succeeds() {
                 expected_chain_len,
                 mode
             );
-            #[cfg(feature = "enforce_policy")]
             let (expected_publisher, expected_role, expected_workload) =
                 ("untrusted.com", "none", "unendorsed-development");
-            #[cfg(not(feature = "enforce_policy"))]
-            let (expected_publisher, expected_role, expected_workload) =
-                ("google-release", "pcit-release-bot", "encrypted-zone");
 
             let expected_san = if is_tls {
                 ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain))

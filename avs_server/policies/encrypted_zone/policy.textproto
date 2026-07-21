@@ -263,7 +263,7 @@ oak_reference_values {
     # TODO: b/515710997 - Populate layer2 with known-good reference values for
     # the Encrypted Zone role.
     layer2 {
-      binary_mpm {
+      binary_mpms {
         skip {
         }
       }

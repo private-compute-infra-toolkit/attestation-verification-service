@@ -67,20 +67,28 @@ fn get_pes_from_kernel_binary_reference_value(
     endorsement.tlog.as_mut()?.pes.as_mut()
 }
 
-/// Helper to extract a mutable reference to the `pes` field from an optional
+/// Helper to extract a mutable reference to the `pes` field from a
 /// `MpmReferenceValue`.
-fn get_pes_from_mpm_reference_value(
-    mpm: &mut Option<MpmReferenceValue>,
+fn get_pes_from_single_mpm_reference_value(
+    mpm: &mut MpmReferenceValue,
 ) -> Option<&mut PesReferenceValue> {
-    let mpm = mpm.as_mut()?;
     let mpm_reference_value::Type::Endorsement(endorsement) = mpm.r#type.as_mut()? else {
         return None;
     };
     endorsement.tlog.as_mut()?.pes.as_mut()
 }
 
+/// Helper to extract a mutable reference to the `pes` field from an optional
+/// `MpmReferenceValue`.
+fn get_pes_from_mpm_reference_value(
+    mpm: &mut Option<MpmReferenceValue>,
+) -> Option<&mut PesReferenceValue> {
+    get_pes_from_single_mpm_reference_value(mpm.as_mut()?)
+}
+
 /// Returns a list of mutable references to all present `pes` fields in the
 /// given `Policy`.
+#[allow(deprecated)]
 fn get_pes_fields(policy: &mut Policy) -> Vec<&mut PesReferenceValue> {
     let mut pes_fields = Vec::new();
 
@@ -108,19 +116,20 @@ fn get_pes_fields(policy: &mut Policy) -> Vec<&mut PesReferenceValue> {
         pes_fields.extend(get_pes_from_binary_reference_value(&mut k.init_ram_fs));
     }
 
-    // layer1 -> runtime_agent_binary & userspace
+    // layer1 -> runtime_agent, runtime_agent_binary & userspace
     if let Some(ref mut l1) = cbt_reference_values.layer1 {
+        pes_fields.extend(get_pes_from_binary_reference_value(&mut l1.runtime_agent));
         pes_fields.extend(get_pes_from_binary_reference_value(&mut l1.runtime_agent_binary));
         pes_fields.extend(get_pes_from_binary_reference_value(&mut l1.userspace));
     }
 
-    // layer2 -> binary_mpm
-    pes_fields.extend(
-        cbt_reference_values
-            .layer2
-            .as_mut()
-            .and_then(|l2| get_pes_from_mpm_reference_value(&mut l2.binary_mpm)),
-    );
+    // layer2 -> binary_mpm & binary_mpms
+    if let Some(ref mut l2) = cbt_reference_values.layer2 {
+        pes_fields.extend(get_pes_from_mpm_reference_value(&mut l2.binary_mpm));
+        for mpm in &mut l2.binary_mpms {
+            pes_fields.extend(get_pes_from_single_mpm_reference_value(mpm));
+        }
+    }
 
     pes_fields
 }
@@ -229,6 +238,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_get_pes_fields_extracts_all_layers() {
         use oak_proto_rust::oak::attestation::v1::{
             AmdSevReferenceValues, CbLayer1TransparentReferenceValues,
@@ -256,13 +266,15 @@ mod tests {
                     }),
                     // Layer 1
                     layer1: Some(CbLayer1TransparentReferenceValues {
+                        runtime_agent: Some(mock_binary_ref_value()),
                         runtime_agent_binary: Some(mock_binary_ref_value()),
                         userspace: Some(mock_binary_ref_value()),
-                        ..Default::default()
                     }),
                     // Layer 2
                     layer2: Some(CbLayer2TransparentReferenceValues {
+                        #[allow(deprecated)]
                         binary_mpm: Some(mock_mpm_ref_value()),
+                        binary_mpms: vec![mock_mpm_ref_value(), mock_mpm_ref_value()],
                     }),
                 })),
             }),
@@ -272,8 +284,8 @@ mod tests {
         // 2. Invoke get_pes_fields
         let fields = get_pes_fields(&mut policy);
 
-        // 3. Assert that all 6 fields across the 4 layers were successfully extracted
-        assert_eq!(fields.len(), 6);
+        // 3. Assert that all 9 fields across the 4 layers were successfully extracted
+        assert_eq!(fields.len(), 9);
     }
 
     #[test]
@@ -299,7 +311,9 @@ mod tests {
                     }),
                     layer1: None,
                     layer2: Some(CbLayer2TransparentReferenceValues {
+                        #[allow(deprecated)]
                         binary_mpm: Some(mock_mpm_ref_value()),
+                        binary_mpms: vec![mock_mpm_ref_value()],
                     }),
                 })),
             }),
@@ -309,8 +323,8 @@ mod tests {
         // 2. Invoke get_pes_fields
         let fields = get_pes_fields(&mut policy);
 
-        // 3. Assert that exactly 2 fields were extracted (from kernel and layer2)
-        assert_eq!(fields.len(), 2);
+        // 3. Assert that exactly 3 fields were extracted (from kernel and layer2)
+        assert_eq!(fields.len(), 3);
     }
 
     #[test]

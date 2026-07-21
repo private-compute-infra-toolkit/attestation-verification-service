@@ -75,7 +75,7 @@ oak_reference_values {
       }
     }
     layer2 {
-      binary_mpm {
+      binary_mpms {
         skip {
         }
       }

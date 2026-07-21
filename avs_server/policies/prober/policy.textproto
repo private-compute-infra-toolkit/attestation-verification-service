@@ -22,6 +22,7 @@ publisher_domain: "google.com"
 publisher_role: "pcit-release-bot"
 workload_name: "attestation-verification-service-prober"
 
+# PES public keys are inserted dynamically into PES objects.
 oak_reference_values {
   cbt {
     root_layer {
@@ -56,14 +57,12 @@ oak_reference_values {
               }
             }
             required_claims {
-              claim_types: "https://github.com/project-oak/oak/blob/main/docs/tr/claim/66738.md"
-              claim_types: "https://github.com/project-oak/oak/blob/main/docs/tr/claim/10271.md"
+              claim_types: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
             }
             tlog {
               all {
               }
               pes {
-                # PES public key set inserted dynamically.
               }
             }
           }
@@ -112,12 +111,12 @@ oak_reference_values {
             }
           }
           required_claims {
+            claim_types: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
           }
           tlog {
             all {
             }
             pes {
-              # PES public key set inserted dynamically.
             }
           }
         }
@@ -152,28 +151,25 @@ oak_reference_values {
             }
           }
           required_claims {
+            claim_types: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
           }
           tlog {
             all {
             }
             pes {
-              # PES public key set inserted dynamically.
             }
           }
         }
       }
       memory_map {
-        # E820 table digest endorsement - SKIP
         skip {
         }
       }
       acpi {
-        # ACPI table digest endorsement - SKIP
         skip {
         }
       }
       kernel_cmd_line_text {
-        # Kernel command line digest endorsement - SKIP
         skip {
         }
       }
@@ -209,12 +205,12 @@ oak_reference_values {
             }
           }
           required_claims {
+            claim_types: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
           }
           tlog {
             all {
             }
             pes {
-              # PES public key set inserted dynamically.
             }
           }
         }
@@ -249,22 +245,82 @@ oak_reference_values {
             }
           }
           required_claims {
+            claim_types: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
           }
           tlog {
             all {
             }
             pes {
-              # PES public key set inserted dynamically.
             }
           }
         }
       }
     }
-    # TODO: b/524966439 - Populate layer2 with known-good reference values for
-    # the Prober role.
     layer2 {
-      binary_mpm {
-        skip {
+      binary_mpms {
+        endorsement {
+          endorser {
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 1
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004\nN\215\'S\r\346\247jIR\316\353\373 \346\320\364h\337\2551\026\230\257d\027\220\275\365U\321\030j\211\007ig\225\275\224.Ip\374tA\3376\315\ny\253\271\027%\370th\316V\210\213\207"
+            }
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 2
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004\346\247E\232&\225$\203W\240\215\217\ty\274\325&\373\315>\362\304\203\024\212\301\244\264\207\277\237Up\001E\236\335\366f\334i\230w\\\'>\245\345N\360H\262\225-9\245\263\264.\305\355Y\251\261"
+            }
+          }
+          required_claims {
+            claim_types: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
+            claim_types: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/workload.md"
+          }
+          tlog {
+            all {
+            }
+            pes {
+            }
+          }
+        }
+      }
+      binary_mpms {
+        endorsement {
+          endorser {
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 1
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004G\232\2650\375\201m7\206!\263\306#\024\2301\017\r\213\004d\030\341\271\234\321#.\322\036`\005\372\310%?\377\005{\361\231V\355\213\327\344`\325\037\237\304\233\177\331\370/\200s\006\'\231e\207\030"
+            }
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 2
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004\"\256\225Y\332\t\027\006\211\351\356}\rD\354b\326o\236\342\263s7\037\307ad\276S?Y\216$\317\327\230\004]\034\n\002\361>\206\315\236S\306`$\334\004\0012\263B\326_Y\246sVh&"
+            }
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 3
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004\024/\027\216\302\'\311\376d\247\347y\333{\257\235cd\333>\360\027k\n;\032\322\315k\300\270U\360\r:5bl\243\366\332\177\363t\361\303\227\246\235\372\010j\313\023\035\257\325g\253\323\374\024(\247"
+            }
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 4
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004d\307eV\227\006\016{L=.j\r\206qDw\271\245\036\374$\301j\353 MD\025\311\224\303\005%YR&\331\016l\232\315\211\371\251\306\3128)\220\003n\261\350G\371\"\245\305-%g\331."
+            }
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 5
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004\236r\365\373\r]N\312\347m\"P\265\331\237Az\341\244Y\357;C\345\224i\n\205\003s[S\324Q\260q\215`53\360\361\000(_\026\212%\337\3229\204\332\374\245\236\244-\363\375W\357\263\205"
+            }
+          }
+          required_claims {
+            claim_types: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
+          }
+          tlog {
+            all {
+            }
+            pes {
+            }
+          }
         }
       }
     }

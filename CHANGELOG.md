@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.8.0 (2026-07-21)
+
+
+### Dependencies
+
+* **deps:** Update PES root certificates (diff hash: 81d420b5)
+* **deps:** Update PES root certificates (diff hash: 97bb3431)
+
+
+### Features
+
+* bump up oak dependency version
+* enable policy enforcement
+* migrate policies to binary_mpms ref values
+* populate PES keys in runtime_agent
+* skip binary_mpms for dev policy
+* update AVS prober policy
+* update Oak dpendency
+* update Oak for updated package verification
+
 ## 0.7.0 (2026-07-13)
 
 
