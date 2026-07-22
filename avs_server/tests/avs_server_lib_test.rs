@@ -411,6 +411,70 @@ fn validate_cert_chain(
     assert!(ku.digital_signature(), "Key Usage must include digitalSignature");
     assert!(!ku.key_encipherment(), "Key Usage must NOT include keyEncipherment");
 
+    // -------------------------------------------------------------------------
+    // RFC 5280 Section 4.1.2.4 & 4.2.1.1 Compliance Assertions (Requirements R1 &
+    // R2)
+    // -------------------------------------------------------------------------
+    assert!(
+        certificate_chain.len() >= 2,
+        "Certificate chain must contain at least leaf (index 0) and issuing CA (index 1)"
+    );
+    let issuing_ca_cert = x509_cert::Certificate::from_der(&certificate_chain[1])
+        .expect("failed to parse issuing CA certificate at index 1 from DER");
+
+    // Assert generated leaf cert's Issuer DN equals Subject DN.
+    let leaf_issuer_der = tbs.issuer.to_der().expect("failed to serialize leaf Issuer DN to DER");
+    let issuing_ca_subject_der = issuing_ca_cert
+        .tbs_certificate
+        .subject
+        .to_der()
+        .expect("failed to serialize issuing CA Subject DN to DER");
+    assert_eq!(
+        leaf_issuer_der, issuing_ca_subject_der,
+        "Violation of RFC 5280 Section 4.1.2.4: Leaf certificate's Issuer DN does not match issuing CA's Subject DN byte-for-byte in DER encoding"
+    );
+
+    // Assert generated leaf cert includes an Authority Key Identifier (AKI)
+    // extension containing the exact Subject Key Identifier (SKI) of the
+    // issuing CA certificate.
+    const SKI_OID: x509_cert::spki::ObjectIdentifier =
+        x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.14");
+    const AKI_OID: x509_cert::spki::ObjectIdentifier =
+        x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.35");
+
+    let ca_ski_ext = issuing_ca_cert
+        .tbs_certificate
+        .extensions
+        .as_ref()
+        .and_then(|exts| exts.iter().find(|ext| ext.extn_id == SKI_OID))
+        .expect("issuing CA certificate at index 1 must contain a Subject Key Identifier (SKI, 2.5.29.14) extension");
+    let ca_ski =
+        x509_cert::ext::pkix::SubjectKeyIdentifier::from_der(ca_ski_ext.extn_value.as_bytes())
+            .expect("failed to decode Subject Key Identifier from issuing CA certificate");
+
+    let leaf_aki_ext = tbs
+        .extensions
+        .as_ref()
+        .and_then(|exts| exts.iter().find(|ext| ext.extn_id == AKI_OID))
+        .expect("leaf certificate at index 0 must contain an Authority Key Identifier (AKI, 2.5.29.35) extension");
+    assert!(
+        !leaf_aki_ext.critical,
+        "Per RFC 5280 Section 4.2.1.1, the Authority Key Identifier extension must be non-critical"
+    );
+    let leaf_aki =
+        x509_cert::ext::pkix::AuthorityKeyIdentifier::from_der(leaf_aki_ext.extn_value.as_bytes())
+            .expect("failed to decode Authority Key Identifier from leaf certificate");
+    let aki_key_id = leaf_aki
+        .key_identifier
+        .expect("leaf Authority Key Identifier must contain the keyIdentifier field");
+
+    assert_eq!(
+        aki_key_id.as_bytes(),
+        ca_ski.0.as_bytes(),
+        "Violation of RFC 5280 Section 4.2.1.1: Leaf Authority Key Identifier (AKI) does not match issuing CA's Subject Key Identifier (SKI)"
+    );
+    // -------------------------------------------------------------------------
+
     // Validate that each certificate in the chain is signed by the next.
     for i in 0..certificate_chain.len() - 1 {
         let cert = x509_cert::Certificate::from_der(&certificate_chain[i]).unwrap();

@@ -209,6 +209,13 @@ impl CertificateAuthority {
                 return Err(e);
             }
 
+            if let Err(e) =
+                Self::set_x509_authority_key_identifier(x509, &self.ca_cert_chain_der[0])
+            {
+                bssl_sys::X509_free(x509);
+                return Err(e);
+            }
+
             if let Err(e) = Self::set_x509_validity(x509, CERT_VALIDITY) {
                 bssl_sys::X509_free(x509);
                 return Err(e);
@@ -424,6 +431,10 @@ impl CertificateAuthority {
                 bssl_sys::X509_free(x509);
                 return Err(e);
             }
+            if let Err(e) = Self::set_x509_subject_key_identifier(x509) {
+                bssl_sys::X509_free(x509);
+                return Err(e);
+            }
             if let Err(e) = Self::sign_x509(x509, key_pair) {
                 bssl_sys::X509_free(x509);
                 return Err(e);
@@ -550,6 +561,102 @@ impl CertificateAuthority {
             }
             bssl_sys::X509_EXTENSION_free(ext);
         }
+        Ok(())
+    }
+
+    // Adds a Subject Key Identifier (SKI) extension (OID 2.5.29.14) to a CA
+    // certificate. See RFC 5280 Section 4.2.1.2:
+    // https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.2
+    fn set_x509_subject_key_identifier(x509: *mut bssl_sys::X509) -> anyhow::Result<()> {
+        let mut ctx = std::mem::MaybeUninit::<bssl_sys::X509V3_CTX>::uninit();
+        unsafe {
+            // For self-signed root certificates, issuer and subject are identical.
+            // Setting subject is required to compute the SHA-1 hash of
+            // SubjectPublicKeyInfo.
+            bssl_sys::X509V3_set_ctx(
+                ctx.as_mut_ptr(),
+                x509,                 // issuer
+                x509,                 // subject
+                std::ptr::null_mut(), // req
+                std::ptr::null_mut(), // crl
+                0,                    // flags
+            );
+        }
+        let mut ctx = unsafe { ctx.assume_init() };
+        let config_directive = std::ffi::CString::new("hash")
+            .map_err(|_| anyhow::anyhow!("Failed to create SKI config_directive string"))?;
+        unsafe {
+            let ext = bssl_sys::X509V3_EXT_nconf_nid(
+                std::ptr::null_mut(),
+                &mut ctx as *mut _,
+                bssl_sys::NID_subject_key_identifier,
+                config_directive.as_ptr(),
+            );
+            if ext.is_null() {
+                anyhow::bail!("Failed to create Subject Key Identifier extension");
+            }
+            if bssl_sys::X509_add_ext(x509, ext, -1) != 1 {
+                bssl_sys::X509_EXTENSION_free(ext);
+                anyhow::bail!("Failed to add Subject Key Identifier extension");
+            }
+            bssl_sys::X509_EXTENSION_free(ext);
+        }
+        Ok(())
+    }
+
+    // Adds an Authority Key Identifier (AKI) extension (OID 2.5.29.35) to a leaf
+    // certificate by extracting the Subject Key Identifier (SKI) from the
+    // issuing CA certificate. See RFC 5280 Section 4.2.1.1:
+    // https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.1
+    fn set_x509_authority_key_identifier(
+        x509: *mut bssl_sys::X509,
+        issuer_cert_der: &[u8],
+    ) -> anyhow::Result<()> {
+        let mut ptr = issuer_cert_der.as_ptr();
+        let issuer_x509 = unsafe {
+            bssl_sys::d2i_X509(std::ptr::null_mut(), &mut ptr, issuer_cert_der.len() as i64)
+        };
+        if issuer_x509.is_null() {
+            anyhow::bail!("Failed to parse issuing CA certificate for AKI injection");
+        }
+
+        let mut ctx = std::mem::MaybeUninit::<bssl_sys::X509V3_CTX>::uninit();
+        unsafe {
+            // Initialize X509V3_CTX linking the issuing CA cert (issuer) and leaf cert
+            // (subject).
+            bssl_sys::X509V3_set_ctx(
+                ctx.as_mut_ptr(),
+                issuer_x509,          // issuer: active signing CA certificate
+                x509,                 // subject: leaf certificate being built
+                std::ptr::null_mut(), // req
+                std::ptr::null_mut(), // crl
+                0,                    // flags
+            );
+        }
+        let mut ctx = unsafe { ctx.assume_init() };
+
+        let value = std::ffi::CString::new("keyid:always")
+            .map_err(|_| anyhow::anyhow!("Failed to create AKI value string"))?;
+        let ext = unsafe {
+            bssl_sys::X509V3_EXT_nconf_nid(
+                std::ptr::null_mut(),
+                &mut ctx as *mut _,
+                bssl_sys::NID_authority_key_identifier,
+                value.as_ptr(),
+            )
+        };
+
+        // Clean up temporary issuer certificate immediately.
+        unsafe { bssl_sys::X509_free(issuer_x509) };
+
+        if ext.is_null() {
+            anyhow::bail!("Failed to create Authority Key Identifier extension (ensure issuer possesses an SKI)");
+        }
+        if unsafe { bssl_sys::X509_add_ext(x509, ext, -1) } != 1 {
+            unsafe { bssl_sys::X509_EXTENSION_free(ext) };
+            anyhow::bail!("Failed to add Authority Key Identifier extension to leaf certificate");
+        }
+        unsafe { bssl_sys::X509_EXTENSION_free(ext) };
         Ok(())
     }
 

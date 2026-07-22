@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.9.0 (2026-07-22)
+
+
+### Features
+
+* AVS sets the Authority Key Identifier extension in issued certs
+
 ## 0.8.0 (2026-07-21)
 
 
