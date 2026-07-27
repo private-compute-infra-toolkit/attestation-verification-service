@@ -1,2 +1,2 @@
 3a2c5c7ac8b78b43fbaa2afc5738ffcbd85469c3d4f3c98513b7b3cb58ae9c3f  bazel-bin/avs_server/avs_server
-f040e980ba8e7f935c6f158f19e1f7c81a0f79dedac7d2a5c73218c768db6ed7  bazel-bin/avs_server/avs_server_bundle.tar
+7ca982b58af4f3ef268e5ffb38af11c29f24c4dd4079800888b722d8ce4d670c  bazel-bin/avs_server/avs_server_bundle.tar
