@@ -16,7 +16,7 @@
 
 use c2sp::Policy;
 
-const C2SP_POLICY: &str = include_str!("../src/c2sp_policy.txt");
+const C2SP_POLICY: &str = include_str!("../policies/c2sp_policy.txt");
 
 #[test]
 fn c2sp_policy_parses_successfully() {

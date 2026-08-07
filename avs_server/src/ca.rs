@@ -474,40 +474,23 @@ impl CertificateAuthority {
     // See RFC 5280 Section 4.2.1.9:
     // https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.9
     fn set_x509_ca_basic_constraints(x509: *mut bssl_sys::X509) -> anyhow::Result<()> {
+        let value = std::ffi::CString::new("critical,CA:TRUE")
+            .map_err(|_| anyhow::anyhow!("Failed to create CA BasicConstraints value string"))?;
         unsafe {
-            let basic_constraints = bssl_sys::BASIC_CONSTRAINTS_new();
-            if basic_constraints.is_null() {
-                anyhow::bail!("Failed to create BASIC_CONSTRAINTS");
-            }
-
-            if let Some(bc) = basic_constraints.as_mut() {
-                bc.ca = 1;
-            } else {
-                // This case should be impossible due to the is_null() check above,
-                // but handling it defensively.
-                bssl_sys::BASIC_CONSTRAINTS_free(basic_constraints);
-                anyhow::bail!("Failed to get mutable reference to BASIC_CONSTRAINTS");
-            }
-
-            // Create a Basic Constraints extension to be added to a CA certificate,
-            // marking the certificate as capable of issuing other certificates.
-            let ext = bssl_sys::X509_EXTENSION_create_by_NID(
-                std::ptr::null_mut(),            // ext, optional existing extension
-                bssl_sys::NID_basic_constraints, // NID for the extension type
-                1,                               // Mark this extension as critical.
-                basic_constraints as *mut _,     // Pointer to the extension data
+            let ext = bssl_sys::X509V3_EXT_nconf_nid(
+                /* conf= */ std::ptr::null_mut(),
+                /* ctx= */ std::ptr::null(),
+                /* ext_nid= */ bssl_sys::NID_basic_constraints,
+                /* value= */ value.as_ptr(),
             );
             if ext.is_null() {
-                bssl_sys::BASIC_CONSTRAINTS_free(basic_constraints);
-                anyhow::bail!("Failed to create basic constraints extension");
+                anyhow::bail!("Failed to create CA BasicConstraints extension");
             }
             if bssl_sys::X509_add_ext(x509, ext, -1) != 1 {
                 bssl_sys::X509_EXTENSION_free(ext);
-                bssl_sys::BASIC_CONSTRAINTS_free(basic_constraints);
-                anyhow::bail!("Failed to add basic constraints extension");
+                anyhow::bail!("Failed to add CA BasicConstraints extension");
             }
             bssl_sys::X509_EXTENSION_free(ext);
-            bssl_sys::BASIC_CONSTRAINTS_free(basic_constraints);
         }
         Ok(())
     }
@@ -790,6 +773,72 @@ impl CertificateAuthority {
         }
     }
 
+    fn create_san_extension_from_str(
+        value: &str,
+        gen_type: std::os::raw::c_int,
+    ) -> anyhow::Result<*mut bssl_sys::X509_EXTENSION> {
+        unsafe {
+            // 1. Allocate and set ASN1_IA5STRING
+            let ia5 = bssl_sys::ASN1_IA5STRING_new();
+            if ia5.is_null() {
+                anyhow::bail!("Failed to allocate ASN1_IA5STRING for SAN extension");
+            }
+            if bssl_sys::ASN1_STRING_set(
+                ia5 as *mut bssl_sys::ASN1_STRING,
+                value.as_ptr() as *const std::os::raw::c_void,
+                value.len() as bssl_sys::ossl_ssize_t,
+            ) != 1
+            {
+                bssl_sys::ASN1_IA5STRING_free(ia5);
+                anyhow::bail!("Failed to set ASN1_IA5STRING content for SAN extension");
+            }
+
+            // 2. Allocate GENERAL_NAME and assign value
+            let general_name = bssl_sys::GENERAL_NAME_new();
+            if general_name.is_null() {
+                bssl_sys::ASN1_IA5STRING_free(ia5);
+                anyhow::bail!("Failed to allocate GENERAL_NAME for SAN extension");
+            }
+            // GENERAL_NAME_set0_value transfers ownership of `ia5` to `general_name`.
+            bssl_sys::GENERAL_NAME_set0_value(
+                general_name,
+                gen_type,
+                ia5 as *mut std::os::raw::c_void,
+            );
+
+            // 3. Allocate GENERAL_NAMES stack
+            let gens = bssl_sys::GENERAL_NAMES_new();
+            if gens.is_null() {
+                bssl_sys::GENERAL_NAME_free(general_name);
+                anyhow::bail!("Failed to allocate GENERAL_NAMES stack for SAN extension");
+            }
+
+            // 4. Push general_name to gens stack
+            if bssl_sys::sk_GENERAL_NAME_push(gens, general_name) == 0 {
+                bssl_sys::GENERAL_NAME_free(general_name);
+                bssl_sys::GENERAL_NAMES_free(gens);
+                anyhow::bail!("Failed to push GENERAL_NAME to GENERAL_NAMES stack");
+            }
+            // `gens` now owns `general_name` (and nested `ia5`).
+
+            // 5. Serialize GENERAL_NAMES into X509_EXTENSION via DER encoding (i2d)
+            let ext = bssl_sys::X509V3_EXT_i2d(
+                bssl_sys::NID_subject_alt_name,
+                /* crit= */ 0,
+                gens as *mut std::os::raw::c_void,
+            );
+
+            // Free the GENERAL_NAMES stack and its contained elements.
+            bssl_sys::GENERAL_NAMES_free(gens);
+
+            if ext.is_null() {
+                anyhow::bail!("Failed to create SAN X509_EXTENSION via X509V3_EXT_i2d");
+            }
+
+            Ok(ext)
+        }
+    }
+
     fn create_spiffe_extension(
         &self,
         identity: &ProvisionedIdentity,
@@ -797,7 +846,7 @@ impl CertificateAuthority {
         // Add SPIFFE ID as `subject_alt_name` (OID 2.5.29.17) extension
         // and URI type.
         let spiffe_id = format!(
-            "URI:spiffe://{}/operator/{}/{}/publisher/{}/{}/workload/{}",
+            "spiffe://{}/operator/{}/{}/publisher/{}/{}/workload/{}",
             self.trust_domain,
             identity.operator_domain,
             identity.operator_role,
@@ -805,17 +854,7 @@ impl CertificateAuthority {
             identity.publisher_role,
             identity.workload_name,
         );
-        let ext_value = std::ffi::CString::new(spiffe_id)
-            .map_err(|_| anyhow::anyhow!("Cannot create SPIFFE string"))?;
-        let ext = unsafe {
-            bssl_sys::X509V3_EXT_nconf_nid(
-                /* conf= */ std::ptr::null_mut(),
-                /* ctx= */ std::ptr::null(),
-                /* ext_nid= */ bssl_sys::NID_subject_alt_name,
-                /* value= */ ext_value.as_ptr(),
-            )
-        };
-        Ok(ext)
+        Self::create_san_extension_from_str(&spiffe_id, bssl_sys::GEN_URI)
     }
 
     fn create_dns_extension(
@@ -825,20 +864,10 @@ impl CertificateAuthority {
         // Add a DNS name as `subject_alt_name` (OID 2.5.29.17) extension
         // in the format: <operator_role>.<operator_domain>.<trust_domain>.
         let dns_name = format!(
-            "DNS:{}.{}.{}",
+            "{}.{}.{}",
             identity.operator_role, identity.operator_domain, self.trust_domain,
         );
-        let ext_value = std::ffi::CString::new(dns_name)
-            .map_err(|_| anyhow::anyhow!("Cannot create DNS SAN string"))?;
-        let ext = unsafe {
-            bssl_sys::X509V3_EXT_nconf_nid(
-                /* conf= */ std::ptr::null_mut(),
-                /* ctx= */ std::ptr::null(),
-                /* ext_nid= */ bssl_sys::NID_subject_alt_name,
-                /* value= */ ext_value.as_ptr(),
-            )
-        };
-        Ok(ext)
+        Self::create_san_extension_from_str(&dns_name, bssl_sys::GEN_DNS)
     }
 
     // Adds the Extended Key Usage extension based on the connection mode.
@@ -992,3 +1021,119 @@ impl PartialEq for KeyPair {
 }
 
 impl Eq for KeyPair {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_identity(
+        connection_mode: ConnectionMode,
+        operator_domain: &str,
+        operator_role: &str,
+    ) -> ProvisionedIdentity {
+        let key_pair = CertificateAuthority::create_ca_keypair().unwrap();
+        ProvisionedIdentity {
+            public_key: key_pair,
+            connection_mode,
+            operator_domain: operator_domain.to_string(),
+            operator_role: operator_role.to_string(),
+            publisher_domain: "publisher.example.com".to_string(),
+            publisher_role: "enclave".to_string(),
+            workload_name: "test-workload".to_string(),
+        }
+    }
+
+    fn extract_san_entries(cert_der: &[u8]) -> anyhow::Result<Vec<(i32, String)>> {
+        unsafe {
+            let mut ptr = cert_der.as_ptr();
+            let x509 = bssl_sys::d2i_X509(std::ptr::null_mut(), &mut ptr, cert_der.len() as i64);
+            if x509.is_null() {
+                anyhow::bail!("Failed to parse certificate");
+            }
+
+            let ext_idx = bssl_sys::X509_get_ext_by_NID(x509, bssl_sys::NID_subject_alt_name, -1);
+            if ext_idx < 0 {
+                bssl_sys::X509_free(x509);
+                anyhow::bail!("Certificate does not contain a Subject Alternative Name extension");
+            }
+
+            let ext = bssl_sys::X509_get_ext(x509, ext_idx);
+            if ext.is_null() {
+                bssl_sys::X509_free(x509);
+                anyhow::bail!("Failed to retrieve SAN extension");
+            }
+
+            let gens = bssl_sys::X509V3_EXT_d2i(ext) as *mut bssl_sys::GENERAL_NAMES;
+            if gens.is_null() {
+                bssl_sys::X509_free(x509);
+                anyhow::bail!("Failed to deserialize GENERAL_NAMES");
+            }
+
+            let num = bssl_sys::sk_GENERAL_NAME_num(gens);
+            let mut entries = Vec::new();
+            for i in 0..num {
+                let general_name = bssl_sys::sk_GENERAL_NAME_value(gens, i);
+                if !general_name.is_null() {
+                    let gen_type = (*general_name).type_;
+                    let ia5 = (*general_name).d.ia5;
+                    if !ia5.is_null() {
+                        let data_ptr = bssl_sys::ASN1_STRING_get0_data(ia5);
+                        let data_len = bssl_sys::ASN1_STRING_length(ia5);
+                        if !data_ptr.is_null() && data_len >= 0 {
+                            let bytes = std::slice::from_raw_parts(data_ptr, data_len as usize);
+                            if let Ok(s) = std::str::from_utf8(bytes) {
+                                entries.push((gen_type, s.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+
+            bssl_sys::GENERAL_NAMES_free(gens);
+            bssl_sys::X509_free(x509);
+
+            Ok(entries)
+        }
+    }
+
+    #[test]
+    fn test_generate_certificate_spiffe_uri_sunny_day() {
+        let ca = CertificateAuthority::new_root().unwrap();
+        let identity =
+            create_test_identity(ConnectionMode::Unrestricted, "prod.google.com", "encrypted-zone");
+        let cert_der = ca.generate_certificate(&identity).unwrap();
+        let entries = extract_san_entries(&cert_der).unwrap();
+
+        assert_eq!(entries.len(), 1, "Expected exactly 1 SAN entry");
+        assert_eq!(entries[0].0, bssl_sys::GEN_URI, "Expected GEN_URI type");
+        assert_eq!(
+            entries[0].1,
+            "spiffe://prod.google.com.avs.pcit.goog/operator/prod.google.com/encrypted-zone/publisher/publisher.example.com/enclave/workload/test-workload"
+        );
+
+        // Also test Mtls mode (which uses SPIFFE URI SAN)
+        let identity_mtls =
+            create_test_identity(ConnectionMode::Mtls, "sub.domain.org", "worker_node");
+        let cert_der_mtls = ca.generate_certificate(&identity_mtls).unwrap();
+        let entries_mtls = extract_san_entries(&cert_der_mtls).unwrap();
+
+        assert_eq!(entries_mtls.len(), 1, "Expected exactly 1 SAN entry in Mtls mode");
+        assert_eq!(entries_mtls[0].0, bssl_sys::GEN_URI, "Expected GEN_URI type");
+        assert_eq!(
+            entries_mtls[0].1,
+            "spiffe://prod.google.com.avs.pcit.goog/operator/sub.domain.org/worker_node/publisher/publisher.example.com/enclave/workload/test-workload"
+        );
+    }
+
+    #[test]
+    fn test_generate_certificate_dns_sunny_day() {
+        let ca = CertificateAuthority::new_root().unwrap();
+        let identity = create_test_identity(ConnectionMode::Tls, "google.com", "frontend");
+        let cert_der = ca.generate_certificate(&identity).unwrap();
+        let entries = extract_san_entries(&cert_der).unwrap();
+
+        assert_eq!(entries.len(), 1, "Expected exactly 1 SAN entry");
+        assert_eq!(entries[0].0, bssl_sys::GEN_DNS, "Expected GEN_DNS type");
+        assert_eq!(entries[0].1, "frontend.google.com.prod.google.com.avs.pcit.goog");
+    }
+}

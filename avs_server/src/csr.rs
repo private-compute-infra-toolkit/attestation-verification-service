@@ -16,9 +16,9 @@
 
 use std::sync::Arc;
 
-use crate::ca::KeyPair;
+use crate::{ca::KeyPair, operator_info::OperatorInfo};
 use anyhow::Context;
-use avs_proto_rust::avs::{OperatorInfo, PolicyHint};
+use avs_proto_rust::avs::PolicyHint;
 use oak_attestation_verification::{
     results::get_user_data_payload, AmdSevSnpPolicy, AmdSevSnpTransparentDiceAttestationVerifier,
     FirmwarePolicy, TransparentLayer1Policy, TransparentLayer2Policy, TransparentStage0Policy,
@@ -143,6 +143,7 @@ pub(crate) fn validate_csr_request(
     operator_info: &OperatorInfo,
     policies_config: &policies::PoliciesConfig,
 ) -> anyhow::Result<ProvisionedIdentity> {
+    use anyhow::Context;
     use oak_proto_rust::oak::attestation::v1::reference_values;
 
     let csr_public_key = verify_csr_and_get_public_key(csr_der)?;
@@ -151,6 +152,22 @@ pub(crate) fn validate_csr_request(
         .map_err(|_| anyhow::anyhow!("unrecognized policy_hint value: {}", policy_hint))?;
     let policy = policies::get_policy_with_config(hint, policies_config)
         .context("looking up policy for the given policy_hint")?;
+
+    let operator_policy =
+        policy.operator_policy.as_ref().context("retrieving operator_policy from policy")?;
+
+    let is_operator_authorized = operator_policy
+        .rules
+        .iter()
+        .any(|rule| rule.domain == operator_info.domain() && rule.role == operator_info.role());
+
+    anyhow::ensure!(
+        is_operator_authorized,
+        "operator '{}/{}' is not authorized by operator_policy: {:?}",
+        operator_info.domain(),
+        operator_info.role(),
+        operator_policy
+    );
 
     let oak_ref_values =
         policy.oak_reference_values.as_ref().context("policy is missing oak_reference_values")?;
@@ -174,22 +191,11 @@ pub(crate) fn validate_csr_request(
 
     let connection_mode: ConnectionMode = hint.into();
 
-    anyhow::ensure!(
-        !operator_info.operator_domain.is_empty(),
-        "operator_domain must be specified in operator_info"
-    );
-    let operator_domain = operator_info.operator_domain.clone();
-    let operator_role = if operator_info.operator_role.is_empty() {
-        "none".to_string()
-    } else {
-        operator_info.operator_role.clone()
-    };
-
     Ok(ProvisionedIdentity {
         public_key: csr_public_key,
         connection_mode,
-        operator_domain,
-        operator_role,
+        operator_domain: operator_info.domain().to_string(),
+        operator_role: operator_info.role().to_string(),
         publisher_domain: policy.publisher_domain,
         publisher_role: policy.publisher_role,
         workload_name: policy.workload_name,

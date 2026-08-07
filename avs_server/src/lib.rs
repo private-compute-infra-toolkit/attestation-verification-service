@@ -17,6 +17,7 @@
 pub mod ca;
 pub mod config;
 pub mod csr;
+pub mod operator_info;
 pub mod server;
 
 pub use policies;

@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-use crate::{ca, csr};
+use crate::{ca, csr, operator_info::OperatorInfo};
 use avs_proto_rust::avs::{
     attestation_verification_server::AttestationVerification, certify_attestation_stream_request,
     certify_attestation_stream_response, CertifyAttestationRequest, CertifyAttestationResponse,
@@ -80,9 +80,11 @@ impl AttestationVerification for AttestationVerificationService {
             return Err(Status::failed_precondition("request is missing `endorsements`"));
         };
 
-        let Some(ref operator_info) = req.operator_info else {
-            return Err(Status::failed_precondition("request is missing `operator_info`"));
+        let Some(ref operator_info_proto) = req.operator_info else {
+            return Err(Status::invalid_argument("request is missing `operator_info`"));
         };
+
+        let operator_info = OperatorInfo::try_from(operator_info_proto)?;
 
         let identity = csr::validate_csr_request(
             req.csr.as_slice(),
@@ -90,7 +92,7 @@ impl AttestationVerification for AttestationVerificationService {
             endorsements,
             None,
             req.policy_hint,
-            operator_info,
+            &operator_info,
             &self.policies_config,
         )
         .map_err(|e| Status::new(tonic::Code::FailedPrecondition, format!("{e:?}")))?;
@@ -188,22 +190,29 @@ impl AttestationVerification for AttestationVerificationService {
             let evidence = match certify_request.evidence {
                 Some(e) => e,
                 None => {
-                    let _ = tx.send(Err(Status::failed_precondition("missing evidence"))).await;
+                    let _ = tx.send(Err(Status::invalid_argument("missing evidence"))).await;
                     return;
                 }
             };
             let endorsements = match certify_request.endorsements {
                 Some(e) => e,
                 None => {
-                    let _ = tx.send(Err(Status::failed_precondition("missing endorsements"))).await;
+                    let _ = tx.send(Err(Status::invalid_argument("missing endorsements"))).await;
                     return;
                 }
             };
-            let operator_info = match certify_request.operator_info {
+            let operator_info_proto = match certify_request.operator_info {
                 Some(o) => o,
                 None => {
-                    let _ =
-                        tx.send(Err(Status::failed_precondition("missing operator_info"))).await;
+                    let _ = tx.send(Err(Status::invalid_argument("missing operator_info"))).await;
+                    return;
+                }
+            };
+
+            let operator_info = match OperatorInfo::try_from(operator_info_proto) {
+                Ok(o) => o,
+                Err(e) => {
+                    let _ = tx.send(Err(e.into())).await;
                     return;
                 }
             };

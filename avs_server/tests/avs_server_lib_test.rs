@@ -222,13 +222,23 @@ enum ExpectedSan {
 
 fn test_operator_info() -> OperatorInfo {
     OperatorInfo {
-        operator_domain: "google".to_string(),
-        operator_role: "encrypted-zone".to_string(),
+        operator_domain: "prod.google.com".to_string(),
+        operator_role: "pa-frontend".to_string(),
     }
 }
 
 fn test_prober_operator_info() -> OperatorInfo {
-    OperatorInfo { operator_domain: "google".to_string(), operator_role: "prober".to_string() }
+    OperatorInfo {
+        operator_domain: "prod.google.com".to_string(),
+        operator_role: "prober".to_string(),
+    }
+}
+
+fn test_dev_operator_info() -> OperatorInfo {
+    OperatorInfo {
+        operator_domain: "prod.google.com".to_string(),
+        operator_role: "dev".to_string(),
+    }
 }
 
 enum ExpectedEku {
@@ -396,6 +406,10 @@ fn validate_cert_chain(
     let bc = x509_cert::ext::pkix::BasicConstraints::from_der(bc_ext.extn_value.as_bytes())
         .expect("failed to parse BasicConstraints extension");
     assert!(!bc.ca, "leaf certificate BasicConstraints must have CA:FALSE");
+    assert!(
+        bc.path_len_constraint.is_none(),
+        "leaf certificate BasicConstraints pathLenConstraint must be None"
+    );
 
     // Validate Key Usage: must be present, critical, with digitalSignature.
     const KEY_USAGE_OID: x509_cert::spki::ObjectIdentifier =
@@ -529,7 +543,7 @@ async fn test_valid_certify_attestation() {
                 csr: csr_der.clone(),
                 evidence: Some(evidence),
                 endorsements: Some(endorsements.clone()),
-                operator_info: Some(test_operator_info()),
+                operator_info: Some(test_dev_operator_info()),
                 policy_hint: policy_hint.into(),
             };
 
@@ -549,10 +563,10 @@ async fn test_valid_certify_attestation() {
                 ("untrusted.com", "none", "unendorsed-development");
 
             let expected_san = if is_tls {
-                ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain))
+                ExpectedSan::DnsName(format!("dev.prod.google.com.{}", expected_trust_domain))
             } else {
                 ExpectedSan::SpiffeUri(format!(
-                    "spiffe://{}/operator/google/encrypted-zone/publisher/{}/{}/workload/{}",
+                    "spiffe://{}/operator/prod.google.com/dev/publisher/{}/{}/workload/{}",
                     expected_trust_domain, expected_publisher, expected_role, expected_workload
                 ))
             };
@@ -599,7 +613,7 @@ async fn test_invalid_vcek_error() {
             csr: csr_der,
             evidence: Some(get_evidence()),
             endorsements: Some(invalid_endorsements),
-            operator_info: Some(test_operator_info()),
+            operator_info: Some(test_dev_operator_info()),
             policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
         };
 
@@ -621,7 +635,7 @@ async fn test_invalid_vcek_error() {
             csr: csr_der,
             evidence: Some(get_evidence()),
             endorsements: Some(empty_endorsements),
-            operator_info: Some(test_operator_info()),
+            operator_info: Some(test_dev_operator_info()),
             policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
         };
 
@@ -778,7 +792,7 @@ async fn test_mismatch_publickey() {
             csr: csr_der,
             evidence: Some(evidence),
             endorsements: Some(endorsements),
-            operator_info: Some(test_operator_info()),
+            operator_info: Some(test_dev_operator_info()),
             policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
         };
 
@@ -1023,7 +1037,7 @@ async fn test_extract_trust_domain_with_multiple_san_entries() {
         csr: csr_der,
         evidence: Some(evidence),
         endorsements: Some(endorsements),
-        operator_info: Some(test_operator_info()),
+        operator_info: Some(test_dev_operator_info()),
         policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
     };
 
@@ -1036,7 +1050,7 @@ async fn test_extract_trust_domain_with_multiple_san_entries() {
         &response.certificate_chain,
         &csr_key_pair,
         &ExpectedSan::SpiffeUri(format!(
-            "spiffe://{}/operator/google/encrypted-zone/publisher/{}/{}/workload/{}",
+            "spiffe://{}/operator/prod.google.com/dev/publisher/{}/{}/workload/{}",
             MOCK_TCA_TRUST_DOMAIN, expected_publisher, expected_role, expected_workload
         )),
         ExpectedEku::None,
@@ -1216,7 +1230,7 @@ async fn test_certify_attestation_stream_nonce_mismatch() {
                     csr: csr_der,
                     evidence: Some(evidence),
                     endorsements: Some(endorsements),
-                    operator_info: Some(test_operator_info()),
+                    operator_info: Some(test_dev_operator_info()),
                     policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
                 },
             )),
@@ -1312,7 +1326,7 @@ async fn test_certify_attestation_stream_success() {
                     csr: csr_der,
                     evidence: Some(evidence),
                     endorsements: Some(endorsements),
-                    operator_info: Some(test_operator_info()),
+                    operator_info: Some(test_dev_operator_info()),
                     policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
                 },
             )),
@@ -1349,7 +1363,7 @@ async fn test_certify_attestation_stream_success() {
             &result.certificate_chain,
             &csr_key_pair,
             &ExpectedSan::SpiffeUri(format!(
-                "spiffe://{}/operator/google/encrypted-zone/publisher/{}/{}/workload/{}",
+                "spiffe://{}/operator/prod.google.com/dev/publisher/{}/{}/workload/{}",
                 expected_trust_domain, expected_publisher, expected_role, expected_workload
             )),
             ExpectedEku::None,
@@ -1451,7 +1465,7 @@ async fn test_development_policy_enabled_succeeds() {
                 csr: csr_der.clone(),
                 evidence: Some(evidence),
                 endorsements: Some(endorsements.clone()),
-                operator_info: Some(test_operator_info()),
+                operator_info: Some(test_dev_operator_info()),
                 policy_hint: policy_hint.into(),
             };
 
@@ -1473,10 +1487,10 @@ async fn test_development_policy_enabled_succeeds() {
                 ("untrusted.com", "none", "unendorsed-development");
 
             let expected_san = if is_tls {
-                ExpectedSan::DnsName(format!("encrypted-zone.google.{}", expected_trust_domain))
+                ExpectedSan::DnsName(format!("dev.prod.google.com.{}", expected_trust_domain))
             } else {
                 ExpectedSan::SpiffeUri(format!(
-                    "spiffe://{}/operator/google/encrypted-zone/publisher/{}/{}/workload/{}",
+                    "spiffe://{}/operator/prod.google.com/dev/publisher/{}/{}/workload/{}",
                     expected_trust_domain, expected_publisher, expected_role, expected_workload
                 ))
             };
@@ -1497,4 +1511,228 @@ async fn test_development_policy_enabled_succeeds() {
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn test_invalid_or_missing_operator_info_unary() {
+    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
+        let test_server = create_test_server_with_config(
+            mode.clone(),
+            policies::PoliciesConfig { include_development_policy: true },
+        )
+        .await
+        .unwrap();
+
+        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+        let empty_variant: Variant = Variant::default();
+        let endorsements = Endorsements {
+            platform: Some(platform_endorsement.into()),
+            initial: Some(empty_variant),
+            ..Default::default()
+        };
+
+        static SUBJECT: &str = "example.com";
+        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+        let public_key_der = public_key_pem.contents();
+
+        let mut evidence = get_evidence();
+        evidence.signed_user_data_certificate =
+            create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+        let mut client = AttestationVerificationClient::connect(format!(
+            "http://localhost:{}",
+            test_server.port
+        ))
+        .await
+        .unwrap();
+
+        let invalid_cases = [
+            // 1. Missing operator_info
+            None,
+            // 2. Empty domain
+            Some(("", "valid-role")),
+            // 3. Empty role
+            Some(("google.com", "")),
+            // 4. Multi-segment / invalid role
+            Some(("google.com", "role/admin")),
+        ];
+
+        for op_info in invalid_cases {
+            let request = CertifyAttestationRequest {
+                csr: csr_der.clone(),
+                evidence: Some(evidence.clone()),
+                endorsements: Some(endorsements.clone()),
+                operator_info: op_info.map(|(d, r)| OperatorInfo {
+                    operator_domain: d.to_string(),
+                    operator_role: r.to_string(),
+                }),
+                policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+            };
+            let status = client.certify_attestation(request).await.unwrap_err();
+            assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        }
+
+        test_server.shutdown_notify.notify_waiters();
+        test_server.server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn test_invalid_or_missing_operator_info_stream() {
+    for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
+        let test_server = create_test_server_with_config(
+            mode.clone(),
+            policies::PoliciesConfig { include_development_policy: true },
+        )
+        .await
+        .unwrap();
+
+        let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+        let empty_variant: Variant = Variant::default();
+        let endorsements = Endorsements {
+            platform: Some(platform_endorsement.into()),
+            initial: Some(empty_variant),
+            ..Default::default()
+        };
+
+        static SUBJECT: &str = "example.com";
+        let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+        let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+        let public_key_der = public_key_pem.contents();
+
+        let test_stream_case = |op_info: Option<OperatorInfo>| {
+            let endorsements = endorsements.clone();
+            let csr_der = csr_der.clone();
+            let port = test_server.port;
+            async move {
+                let mut client =
+                    AttestationVerificationClient::connect(format!("http://localhost:{}", port))
+                        .await
+                        .unwrap();
+
+                let (tx, rx) = tokio::sync::mpsc::channel(2);
+
+                // Send ChallengeRequest
+                tx.send(CertifyAttestationStreamRequest {
+                    request: Some(certify_attestation_stream_request::Request::ChallengeRequest(
+                        ChallengeRequest {},
+                    )),
+                })
+                .await
+                .unwrap();
+
+                let mut response_stream = client
+                    .certify_attestation_stream(tokio_stream::wrappers::ReceiverStream::new(rx))
+                    .await
+                    .unwrap()
+                    .into_inner();
+
+                // Receive ChallengeResponse
+                let response = response_stream.next().await.unwrap().unwrap();
+                let nonce = match response.response {
+                    Some(certify_attestation_stream_response::Response::ChallengeResponse(r)) => {
+                        r.nonce
+                    }
+                    _ => panic!("Expected challenge response"),
+                };
+
+                let bound_payload = construct_binding_payload(&nonce, public_key_der);
+                let mut evidence = get_evidence();
+                evidence.signed_user_data_certificate =
+                    create_signed_user_data_certificate(&bound_payload, SIGNING_PRIVATE_KEY_HEX);
+
+                // Send CertifyRequest
+                tx.send(CertifyAttestationStreamRequest {
+                    request: Some(certify_attestation_stream_request::Request::CertifyRequest(
+                        CertifyAttestationRequest {
+                            csr: csr_der,
+                            evidence: Some(evidence),
+                            endorsements: Some(endorsements),
+                            operator_info: op_info,
+                            policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+                        },
+                    )),
+                })
+                .await
+                .unwrap();
+
+                let response = response_stream.next().await;
+                match response {
+                    Some(Err(status)) => {
+                        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+                    }
+                    other => {
+                        panic!("Expected Err(tonic::Status) with InvalidArgument, got {:?}", other)
+                    }
+                }
+            }
+        };
+
+        let invalid_cases = [
+            // 1. Missing operator_info
+            None,
+            // 2. Empty domain
+            Some(("", "valid-role")),
+            // 3. Empty role
+            Some(("google.com", "")),
+            // 4. Multi-segment / invalid role
+            Some(("google.com", "role/admin")),
+        ];
+
+        for op_info in invalid_cases {
+            test_stream_case(op_info.map(|(d, r)| OperatorInfo {
+                operator_domain: d.to_string(),
+                operator_role: r.to_string(),
+            }))
+            .await;
+        }
+
+        test_server.shutdown_notify.notify_waiters();
+        test_server.server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn test_disallowed_operator_info_returns_error() {
+    let test_server = create_test_server(ServerMode::SelfSigning).await.unwrap();
+
+    let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+    let empty_variant: Variant = Variant::default();
+    let endorsements = Endorsements {
+        platform: Some(platform_endorsement.into()),
+        initial: Some(empty_variant),
+        ..Default::default()
+    };
+
+    static SUBJECT: &str = "example.com";
+    let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+    let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+    let public_key_der = public_key_pem.contents();
+
+    let mut evidence = get_evidence();
+    evidence.signed_user_data_certificate =
+        create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+    let test_cases =
+        [("unauthorized-domain", "pa-frontend"), ("prod.google.com", "unauthorized-role")];
+
+    for (domain, role) in test_cases {
+        let request = CertifyAttestationRequest {
+            csr: csr_der.clone(),
+            evidence: Some(evidence.clone()),
+            endorsements: Some(endorsements.clone()),
+            operator_info: Some(OperatorInfo {
+                operator_domain: domain.to_string(),
+                operator_role: role.to_string(),
+            }),
+            policy_hint: PolicyHint::EzEnforcerCbCertificate.into(),
+        };
+
+        let response = call_certify_attestation(test_server.port, request).await;
+        assert!(response.is_err());
+    }
+
+    test_server.shutdown_notify.notify_waiters();
+    test_server.server.await.unwrap();
 }

@@ -23,6 +23,12 @@
 publisher_domain: "untrusted.com"
 publisher_role: "none"
 workload_name: "unendorsed-development"
+operator_policy {
+  rules {
+    domain: "prod.google.com"
+    role: "dev"
+  }
+}
 
 oak_reference_values {
   cbt {

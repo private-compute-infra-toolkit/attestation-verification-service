@@ -15,6 +15,8 @@
 use avs_proto_rust::avs::{Policy, PolicyHint};
 use prost::Message;
 
+mod any;
+mod c2sp;
 mod certs;
 pub mod pes;
 
@@ -61,6 +63,18 @@ pub fn get_policy_with_config(hint: PolicyHint, config: &PoliciesConfig) -> anyh
         .map_err(|e| anyhow::anyhow!("failed to decode policy: {}", e))?;
 
     pes::inject_pes_keys(&mut policy)?;
+    #[cfg(feature = "enable_tessera")]
+    {
+        // Override all TLog entry verification policies to `any`, allowing any
+        // single TLog entry to satisfy verification rather than requiring all.
+        //
+        // The functions below are speated from the `inject_pes_keys` function for
+        // clarity, but later `inject_pes_keys` should be renamed and re-used to
+        // inject the tessera oak reference values into the policy to prevent
+        // duplicate policy parsing and tlog injection logic.
+        any::override_with_any_strategy(&mut policy)?;
+        c2sp::inject_c2sp_policy(&mut policy)?;
+    }
 
     Ok(policy)
 }
@@ -80,6 +94,10 @@ mod tests {
         let policy = get_policy(PolicyHint::PrivateArateaFrontendCbCertificate)
             .expect("failed to get policy");
         assert_eq!(policy.workload_name, "private-aratea-server");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-frontend");
         assert!(policy.oak_reference_values.is_some());
     }
 
@@ -87,6 +105,10 @@ mod tests {
     fn get_policy_ez_enforcer_returns_valid_policy() {
         let policy = get_policy(PolicyHint::EzEnforcerCbCertificate).expect("failed to get policy");
         assert_eq!(policy.workload_name, "encrypted-zone");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-frontend");
         assert!(policy.oak_reference_values.is_some());
     }
 
@@ -95,6 +117,10 @@ mod tests {
         let policy =
             get_policy(PolicyHint::EzTsmCbFrontendCertificate).expect("failed to get policy");
         assert_eq!(policy.workload_name, "encrypted-zone");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-frontend");
         assert!(policy.oak_reference_values.is_some());
     }
 
@@ -111,6 +137,10 @@ mod tests {
     fn get_policy_prober_returns_valid_policy() {
         let policy = get_policy(PolicyHint::ProberCbCertificate).expect("failed to get policy");
         assert_eq!(policy.workload_name, "attestation-verification-service-prober");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "prober");
         assert!(policy.oak_reference_values.is_some());
     }
 
@@ -142,6 +172,10 @@ mod tests {
                 get_policy_with_config(hint, &PoliciesConfig { include_development_policy: true })
                     .expect("failed to get policy");
             assert_eq!(policy.workload_name, "unendorsed-development");
+            let op = policy.operator_policy.expect("missing operator_policy");
+            assert_eq!(op.rules.len(), 1);
+            assert_eq!(op.rules[0].domain, "prod.google.com");
+            assert_eq!(op.rules[0].role, "dev");
             assert!(policy.oak_reference_values.is_some());
         }
     }

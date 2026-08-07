@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.11.0 (2026-08-07)
+
+
+### Dependencies
+
+* **deps:** Update DevKit to release-3.11.0
+* **deps:** Update policies (diff hash: 5c224d3b)
+
+
+### Features
+
+* add c2sp policy behind flag
+* validate operator domain and role against policy rules
+
+
+### Bug Fixes
+
+* Fix heap memory leaking to self-signed cert
+* Validate operator_info. Build SAN extension safely
+
 ## 0.10.0 (2026-07-27)
 
 

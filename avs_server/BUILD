@@ -28,6 +28,7 @@ AVS_SERVER_LIB_SRCS = [
     "src/config.rs",
     "src/csr.rs",
     "src/lib.rs",
+    "src/operator_info.rs",
     "src/server.rs",
 ]
 
@@ -35,6 +36,7 @@ AVS_SERVER_LIB_DEPS = [
     "//avs_server/proto_rust:avs_proto_rust",
     "@boringssl//rust/bssl-sys",
     "@crates//:glob",
+    "@crates//:thiserror",
     "@oak//oak_attestation_verification",
     "@oak//oak_attestation_verification_types",
     "@oak//oak_proto_rust",
@@ -68,7 +70,7 @@ rust_library(
     name = "avs_server_lib",
     srcs = AVS_SERVER_LIB_SRCS,
     compile_data = [
-        "src/c2sp_policy.txt",
+        "//avs_server/policies:c2sp_policy.txt",
     ],
     deps = [
         "//avs_server/policies",
@@ -130,7 +132,7 @@ rust_test(
     name = "c2sp_policy_test",
     size = "small",
     srcs = ["tests/c2sp_policy_test.rs"],
-    compile_data = ["src/c2sp_policy.txt"],
+    compile_data = ["//avs_server/policies:c2sp_policy.txt"],
     deps = [
         "@oak//tr/c2sp",
     ],

@@ -20,9 +20,27 @@ package attestation_verification;
 
 import "proto/attestation/reference_value.proto";
 
+// Rule specifying an authorized operator domain and role.
+message OperatorRule {
+  // Authorized operator domain (e.g. "prod.google.com").
+  string domain = 1;
+  // Permitted operator role for this domain (e.g. "prober").
+  string role = 2;
+}
+
+// Policy configuring which operator domains and roles are authorized for a workload.
+message OperatorPolicy {
+  // List of authorized operator rules. The request's (operator_domain, operator_role)
+  // must satisfy at least one rule.
+  repeated OperatorRule rules = 1;
+}
+
 message Policy {
   string publisher_domain = 1;
   string publisher_role = 2;
   string workload_name = 3;
   oak.attestation.v1.ReferenceValues oak_reference_values = 4;
+
+  // Operator domain and role policy for the attested workload.
+  OperatorPolicy operator_policy = 5;
 }

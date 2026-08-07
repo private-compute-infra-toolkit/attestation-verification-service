@@ -21,11 +21,14 @@ package(
 rust_library(
     name = "policies",
     srcs = [
+        "any.rs",
+        "c2sp.rs",
         "certs.rs",
         "pes.rs",
         "policy.rs",
     ],
     compile_data = [
+        "c2sp_policy.txt",
         "//avs_server/policies/private_aratea_server:policy_binarypb",
         "//avs_server/policies/encrypted_zone:policy_binarypb",
         "//avs_server/policies/prober:policy_binarypb",

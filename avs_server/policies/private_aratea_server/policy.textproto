@@ -21,6 +21,12 @@
 publisher_domain: "google.com"
 publisher_role: "pcit-release-bot"
 workload_name: "private-aratea-server"
+operator_policy {
+  rules {
+    domain: "prod.google.com"
+    role: "pa-frontend"
+  }
+}
 
 oak_reference_values {
   cbt {

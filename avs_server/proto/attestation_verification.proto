@@ -49,8 +49,7 @@ message OperatorInfo {
   // The specific role or persona of the operator's node (e.g., 'billing',
   // 'encrypted-zone'). This role is used by AVS to determine the set of
   // applicable policies (such as ratified isolates) and is included as a
-  // path segment in the resulting SPIFFE ID. If left blank the issued
-  // operator_role will be `none`.
+  // path segment in the resulting SPIFFE ID.
   string operator_role = 2;
 }
 
