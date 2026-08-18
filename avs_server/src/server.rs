@@ -16,16 +16,76 @@
 
 use crate::{ca, csr, operator_info::OperatorInfo};
 use avs_proto_rust::avs::{
-    attestation_verification_server::AttestationVerification, certify_attestation_stream_request,
-    certify_attestation_stream_response, CertifyAttestationRequest, CertifyAttestationResponse,
-    CertifyAttestationStreamRequest, CertifyAttestationStreamResponse, ChallengeResponse,
-    GenerateAvsSigningKeyRequest, GenerateAvsSigningKeyResponse,
+    attestation_verification_server::AttestationVerification, certify_attestation_request,
+    certify_attestation_stream_request, certify_attestation_stream_response, CertificateProfile,
+    CertifyAttestationRequest, CertifyAttestationResponse, CertifyAttestationStreamRequest,
+    CertifyAttestationStreamResponse, ChallengeResponse, GenerateAvsSigningKeyRequest,
+    GenerateAvsSigningKeyResponse, PolicyHint,
 };
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::{Request, Response, Status};
+
+/// Maps a legacy `PolicyHint` to its corresponding policy name and certificate
+/// profile.
+fn resolve_legacy_hint(hint: PolicyHint) -> anyhow::Result<(&'static str, CertificateProfile)> {
+    match hint {
+        PolicyHint::Unspecified => {
+            anyhow::bail!("cannot resolve policy name for POLICY_HINT_UNSPECIFIED")
+        }
+        PolicyHint::PrivateArateaFrontendCbCertificate => {
+            Ok(("private_aratea_server", CertificateProfile::Unrestricted))
+        }
+        PolicyHint::EzEnforcerCbCertificate => Ok(("encrypted_zone", CertificateProfile::Mtls)),
+        PolicyHint::EzTsmCbFrontendCertificate => Ok(("encrypted_zone", CertificateProfile::Tls)),
+        PolicyHint::ProberCbCertificate => Ok(("prober", CertificateProfile::Unrestricted)),
+        PolicyHint::DevelopmentCbCertificate => {
+            Ok(("development", CertificateProfile::Unrestricted))
+        }
+        PolicyHint::DevelopmentMtlsCbCertificate => Ok(("development", CertificateProfile::Mtls)),
+        PolicyHint::DevelopmentTlsCbCertificate => Ok(("development", CertificateProfile::Tls)),
+    }
+}
+
+/// Resolves the policy selector of a `CertifyAttestationRequest` into a
+/// concrete policy name and certificate profile.
+///
+/// A request carries exactly one selector variant: either the preferred
+/// `CertificationParameters` (explicit policy name + certificate profile) or
+/// the deprecated `PolicyHint`. The two are mutually exclusive by construction
+/// (they share a `oneof`), so no cross-field validation is needed.
+#[allow(deprecated)]
+fn resolve_policy_request(
+    selector: Option<certify_attestation_request::Selector>,
+) -> Result<(String, CertificateProfile), Status> {
+    match selector {
+        None => Err(Status::invalid_argument(
+            "a policy selector is required: set `certification_parameters` (or the deprecated \
+             `policy_hint`)",
+        )),
+        Some(certify_attestation_request::Selector::CertificationParameters(params)) => {
+            if params.policy_name.is_empty() {
+                return Err(Status::invalid_argument("`policy_name` must not be empty"));
+            }
+            let profile = CertificateProfile::try_from(params.certificate_profile)
+                .unwrap_or(CertificateProfile::Unspecified);
+            if profile == CertificateProfile::Unspecified {
+                return Err(Status::invalid_argument(
+                    "`certificate_profile` is required when `policy_name` is specified",
+                ));
+            }
+            Ok((params.policy_name, profile))
+        }
+        Some(certify_attestation_request::Selector::PolicyHint(hint)) => {
+            let hint = PolicyHint::try_from(hint).unwrap_or(PolicyHint::Unspecified);
+            let (name, profile) = resolve_legacy_hint(hint)
+                .map_err(|e| Status::invalid_argument(format!("{e:?}")))?;
+            Ok((name.to_string(), profile))
+        }
+    }
+}
 
 pub struct AttestationVerificationService {
     tca_client: Option<Arc<dyn tca_common::TcaClient>>,
@@ -86,12 +146,15 @@ impl AttestationVerification for AttestationVerificationService {
 
         let operator_info = OperatorInfo::try_from(operator_info_proto)?;
 
+        let (policy_name, certificate_profile) = resolve_policy_request(req.selector)?;
+
         let identity = csr::validate_csr_request(
             req.csr.as_slice(),
             evidence,
             endorsements,
             None,
-            req.policy_hint,
+            &policy_name,
+            certificate_profile,
             &operator_info,
             &self.policies_config,
         )
@@ -217,12 +280,22 @@ impl AttestationVerification for AttestationVerificationService {
                 }
             };
 
+            let (policy_name, certificate_profile) =
+                match resolve_policy_request(certify_request.selector) {
+                    Ok(res) => res,
+                    Err(e) => {
+                        let _ = tx.send(Err(e)).await;
+                        return;
+                    }
+                };
+
             match csr::validate_csr_request(
                 certify_request.csr.as_slice(),
                 &evidence,
                 &endorsements,
                 Some(&nonce),
-                certify_request.policy_hint,
+                &policy_name,
+                certificate_profile,
                 &operator_info,
                 &policies_config,
             ) {
@@ -292,5 +365,43 @@ fn map_tca_error(e: anyhow::Error) -> Status {
         }
     } else {
         Status::internal(format!("Failed to create intermediate certificate authority: {e:?}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_legacy_hint() {
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::PrivateArateaFrontendCbCertificate).unwrap(),
+            ("private_aratea_server", CertificateProfile::Unrestricted)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate).unwrap(),
+            ("encrypted_zone", CertificateProfile::Mtls)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzTsmCbFrontendCertificate).unwrap(),
+            ("encrypted_zone", CertificateProfile::Tls)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::ProberCbCertificate).unwrap(),
+            ("prober", CertificateProfile::Unrestricted)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::DevelopmentCbCertificate).unwrap(),
+            ("development", CertificateProfile::Unrestricted)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::DevelopmentMtlsCbCertificate).unwrap(),
+            ("development", CertificateProfile::Mtls)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::DevelopmentTlsCbCertificate).unwrap(),
+            ("development", CertificateProfile::Tls)
+        );
+        assert!(resolve_legacy_hint(PolicyHint::Unspecified).is_err());
     }
 }

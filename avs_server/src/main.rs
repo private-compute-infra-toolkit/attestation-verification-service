@@ -68,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let policies_config = avs_server_lib::policies::PoliciesConfig {
         include_development_policy: config.include_development_policy,
+        enable_c2sp_tlog: config.enable_c2sp_tlog,
     };
     let attestation_verification_service =
         AttestationVerificationService::new_with_policies_config(tca_client, policies_config);

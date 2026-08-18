@@ -12,33 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("//avs_server/policies:policy_bundle.bzl", "policy_binarypb")
+
 package(
     default_visibility = ["//visibility:public"],
 )
 
-genrule(
+policy_binarypb(
     name = "policy_binarypb",
-    srcs = [
-        "policy.textproto",
-        "//avs_server/proto:policy.proto",
-        "@oak//proto/attestation:reference_value.proto",
-        "@oak//proto/attestation:tcb_version.proto",
-        "@oak//proto:digest.proto",
-        "@com_google_protobuf//:well_known_type_protos",
-        "@com_google_protobuf//:descriptor_proto_srcs",
-    ],
-    outs = ["policy.binarypb"],
-    cmd = "$(location @com_google_protobuf//:protoc) " +
-          "--encode=attestation_verification.Policy " +
-          "--proto_path=$$(dirname $$(dirname $$(dirname $(location //avs_server/proto:policy.proto)))) " +
-          "--proto_path=$$(dirname $$(dirname $$(dirname $(location @oak//proto/attestation:reference_value.proto)))) " +
-          "--proto_path=$$(dirname $$(dirname $$(dirname $(location @com_google_protobuf//:descriptor_proto_srcs)))) " +
-          "avs_server/proto/policy.proto " +
-          "< $(location policy.textproto) " +
-          "> $@",
-    tools = [
-        "@com_google_protobuf//:protoc",
-    ],
 )
 
 filegroup(

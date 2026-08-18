@@ -21,10 +21,11 @@ use std::{
 
 use avs_proto_rust::avs::{
     attestation_verification_client::AttestationVerificationClient,
-    attestation_verification_server::AttestationVerificationServer,
-    certify_attestation_stream_request, certify_attestation_stream_response,
-    CertifyAttestationRequest, CertifyAttestationResponse, CertifyAttestationStreamRequest,
-    ChallengeRequest, GenerateAvsSigningKeyRequest, OperatorInfo, PolicyHint,
+    attestation_verification_server::AttestationVerificationServer, certify_attestation_request,
+    certify_attestation_stream_request, certify_attestation_stream_response, CertificateProfile,
+    CertificationParameters, CertifyAttestationRequest, CertifyAttestationResponse,
+    CertifyAttestationStreamRequest, ChallengeRequest, GenerateAvsSigningKeyRequest, OperatorInfo,
+    PolicyHint,
 };
 use avs_server_lib::policies;
 use avs_server_lib::server::AttestationVerificationService;
@@ -40,6 +41,21 @@ use tokio::{net::TcpListener, sync::Notify, task::JoinHandle};
 use tokio_stream::StreamExt;
 use tonic::transport::Server;
 use x509_cert::der::{Decode, Encode};
+
+fn params_selector(
+    policy_name: &str,
+    profile: CertificateProfile,
+) -> Option<certify_attestation_request::Selector> {
+    Some(certify_attestation_request::Selector::CertificationParameters(CertificationParameters {
+        policy_name: policy_name.to_string(),
+        certificate_profile: profile.into(),
+    }))
+}
+
+#[allow(deprecated)]
+fn hint_selector(hint: PolicyHint) -> Option<certify_attestation_request::Selector> {
+    Some(certify_attestation_request::Selector::PolicyHint(hint.into()))
+}
 
 fn get_evidence() -> Evidence {
     Evidence::decode(include_bytes!("../testdata/redacted_evidence.binarypb").as_slice()).unwrap()
@@ -241,6 +257,7 @@ fn test_dev_operator_info() -> OperatorInfo {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExpectedEku {
     None,
     ServerAuth,
@@ -512,7 +529,7 @@ async fn test_valid_certify_attestation() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
         let test_server = create_test_server_with_config(
             mode.clone(),
-            policies::PoliciesConfig { include_development_policy: true },
+            policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
         )
         .await
         .unwrap();
@@ -530,58 +547,78 @@ async fn test_valid_certify_attestation() {
         let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
         let public_key_der = public_key_pem.contents();
 
-        for (policy_hint, expected_eku, is_tls) in [
-            (PolicyHint::DevelopmentCbCertificate, ExpectedEku::None, false),
-            (PolicyHint::DevelopmentMtlsCbCertificate, ExpectedEku::ServerAndClientAuth, false),
-            (PolicyHint::DevelopmentTlsCbCertificate, ExpectedEku::ServerAuth, true),
+        for (policy_name, profile, policy_hint, expected_eku, is_tls) in [
+            (
+                "development",
+                CertificateProfile::Unrestricted,
+                PolicyHint::DevelopmentCbCertificate,
+                ExpectedEku::None,
+                false,
+            ),
+            (
+                "development",
+                CertificateProfile::Mtls,
+                PolicyHint::DevelopmentMtlsCbCertificate,
+                ExpectedEku::ServerAndClientAuth,
+                false,
+            ),
+            (
+                "development",
+                CertificateProfile::Tls,
+                PolicyHint::DevelopmentTlsCbCertificate,
+                ExpectedEku::ServerAuth,
+                true,
+            ),
         ] {
-            let mut evidence = get_evidence();
-            evidence.signed_user_data_certificate =
-                create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+            for selector in [params_selector(policy_name, profile), hint_selector(policy_hint)] {
+                let mut evidence = get_evidence();
+                evidence.signed_user_data_certificate =
+                    create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
 
-            let request = CertifyAttestationRequest {
-                csr: csr_der.clone(),
-                evidence: Some(evidence),
-                endorsements: Some(endorsements.clone()),
-                operator_info: Some(test_dev_operator_info()),
-                policy_hint: policy_hint.into(),
-            };
+                let request = CertifyAttestationRequest {
+                    csr: csr_der.clone(),
+                    evidence: Some(evidence),
+                    endorsements: Some(endorsements.clone()),
+                    operator_info: Some(test_dev_operator_info()),
+                    selector,
+                };
 
-            let response = call_certify_attestation(test_server.port, request).await.unwrap();
-            let (expected_chain_len, expected_trust_domain) = match mode {
-                ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
-                ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
-            };
-            assert_eq!(
-                response.certificate_chain.len(),
-                expected_chain_len,
-                "Expected {} certificates in chain for {:?} mode",
-                expected_chain_len,
-                mode
-            );
-            let (expected_publisher, expected_role, expected_workload) =
-                ("untrusted.com", "none", "unendorsed-development");
+                let response = call_certify_attestation(test_server.port, request).await.unwrap();
+                let (expected_chain_len, expected_trust_domain) = match mode {
+                    ServerMode::SelfSigning => (2, "prod.google.com.avs.pcit.goog"),
+                    ServerMode::TcaMock => (3, MOCK_TCA_TRUST_DOMAIN),
+                };
+                assert_eq!(
+                    response.certificate_chain.len(),
+                    expected_chain_len,
+                    "Expected {} certificates in chain for {:?} mode",
+                    expected_chain_len,
+                    mode
+                );
+                let (expected_publisher, expected_role, expected_workload) =
+                    ("untrusted.com", "none", "unendorsed-development");
 
-            let expected_san = if is_tls {
-                ExpectedSan::DnsName(format!("dev.prod.google.com.{}", expected_trust_domain))
-            } else {
-                ExpectedSan::SpiffeUri(format!(
-                    "spiffe://{}/operator/prod.google.com/dev/publisher/{}/{}/workload/{}",
-                    expected_trust_domain, expected_publisher, expected_role, expected_workload
-                ))
-            };
+                let expected_san = if is_tls {
+                    ExpectedSan::DnsName(format!("dev.prod.google.com.{}", expected_trust_domain))
+                } else {
+                    ExpectedSan::SpiffeUri(format!(
+                        "spiffe://{}/operator/prod.google.com/dev/publisher/{}/{}/workload/{}",
+                        expected_trust_domain, expected_publisher, expected_role, expected_workload
+                    ))
+                };
 
-            let expected_issuer = match mode {
-                ServerMode::SelfSigning => self_signing_issuer_name(),
-                ServerMode::TcaMock => mock_tca_issuer_name(),
-            };
-            validate_cert_chain(
-                &response.certificate_chain,
-                &csr_key_pair,
-                &expected_san,
-                expected_eku,
-                &expected_issuer,
-            );
+                let expected_issuer = match mode {
+                    ServerMode::SelfSigning => self_signing_issuer_name(),
+                    ServerMode::TcaMock => mock_tca_issuer_name(),
+                };
+                validate_cert_chain(
+                    &response.certificate_chain,
+                    &csr_key_pair,
+                    &expected_san,
+                    expected_eku,
+                    &expected_issuer,
+                );
+            }
         }
         test_server.shutdown_notify.notify_waiters();
         test_server.server.await.unwrap();
@@ -593,7 +630,7 @@ async fn test_invalid_vcek_error() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
         let test_server = create_test_server_with_config(
             mode.clone(),
-            policies::PoliciesConfig { include_development_policy: true },
+            policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
         )
         .await
         .unwrap();
@@ -614,7 +651,7 @@ async fn test_invalid_vcek_error() {
             evidence: Some(get_evidence()),
             endorsements: Some(invalid_endorsements),
             operator_info: Some(test_dev_operator_info()),
-            policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+            selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
         };
 
         match call_certify_attestation(test_server.port, request).await {
@@ -636,7 +673,7 @@ async fn test_invalid_vcek_error() {
             evidence: Some(get_evidence()),
             endorsements: Some(empty_endorsements),
             operator_info: Some(test_dev_operator_info()),
-            policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+            selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
         };
 
         match call_certify_attestation(test_server.port, request).await {
@@ -725,7 +762,7 @@ async fn test_invalid_csr_error() {
             evidence: Some(get_evidence()),
             endorsements: Some(endorsements.clone()),
             operator_info: Some(test_operator_info()),
-            ..Default::default()
+            selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
         };
 
         match call_certify_attestation(test_server.port, request).await {
@@ -742,7 +779,7 @@ async fn test_invalid_csr_error() {
             evidence: Some(get_evidence()),
             endorsements: Some(endorsements.clone()),
             operator_info: Some(test_operator_info()),
-            ..Default::default()
+            selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
         };
 
         match call_certify_attestation(test_server.port, request).await {
@@ -764,7 +801,7 @@ async fn test_mismatch_publickey() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
         let test_server = create_test_server_with_config(
             mode.clone(),
-            policies::PoliciesConfig { include_development_policy: true },
+            policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
         )
         .await
         .unwrap();
@@ -793,7 +830,7 @@ async fn test_mismatch_publickey() {
             evidence: Some(evidence),
             endorsements: Some(endorsements),
             operator_info: Some(test_dev_operator_info()),
-            policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+            selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
         };
 
         match call_certify_attestation(test_server.port, request).await {
@@ -990,7 +1027,7 @@ async fn test_extract_trust_domain_with_multiple_san_entries() {
     let tca_client: Arc<dyn TcaClient> = std::sync::Arc::new(mock_client);
     let service = AttestationVerificationService::new_with_policies_config(
         Some(tca_client),
-        policies::PoliciesConfig { include_development_policy: true },
+        policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
     );
 
     let sockaddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
@@ -1038,7 +1075,7 @@ async fn test_extract_trust_domain_with_multiple_san_entries() {
         evidence: Some(evidence),
         endorsements: Some(endorsements),
         operator_info: Some(test_dev_operator_info()),
-        policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+        selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
     };
 
     let response = call_certify_attestation(port, request).await.unwrap();
@@ -1167,7 +1204,7 @@ async fn test_certify_attestation_stream_nonce_mismatch() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
         let test_server = create_test_server_with_config(
             mode.clone(),
-            policies::PoliciesConfig { include_development_policy: true },
+            policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
         )
         .await
         .unwrap();
@@ -1231,7 +1268,7 @@ async fn test_certify_attestation_stream_nonce_mismatch() {
                     evidence: Some(evidence),
                     endorsements: Some(endorsements),
                     operator_info: Some(test_dev_operator_info()),
-                    policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+                    selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
                 },
             )),
         })
@@ -1248,10 +1285,11 @@ async fn test_certify_attestation_stream_nonce_mismatch() {
                 _ => panic!("Expected final response or error"),
             },
             Some(Err(e)) => assert!(
-                e.to_string().contains("quoted key does not match")
-                    || e.to_string().contains("nonce mismatch")
+                e.to_string().contains("nonce mismatch"),
+                "Expected nonce mismatch error, got: {}",
+                e
             ),
-            None => panic!("Stream closed early"),
+            None => panic!("Expected final response or error"),
         }
 
         test_server.shutdown_notify.notify_waiters();
@@ -1264,7 +1302,7 @@ async fn test_certify_attestation_stream_success() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
         let test_server = create_test_server_with_config(
             mode.clone(),
-            policies::PoliciesConfig { include_development_policy: true },
+            policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
         )
         .await
         .unwrap();
@@ -1327,7 +1365,7 @@ async fn test_certify_attestation_stream_success() {
                     evidence: Some(evidence),
                     endorsements: Some(endorsements),
                     operator_info: Some(test_dev_operator_info()),
-                    policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+                    selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
                 },
             )),
         })
@@ -1411,7 +1449,7 @@ async fn test_development_policy_disabled_fails() {
                 evidence: Some(evidence),
                 endorsements: Some(endorsements.clone()),
                 operator_info: Some(test_operator_info()),
-                policy_hint: policy_hint.into(),
+                selector: hint_selector(policy_hint),
             };
 
             let result = call_certify_attestation(test_server.port, request).await;
@@ -1434,7 +1472,7 @@ async fn test_development_policy_enabled_succeeds() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
         let test_server = create_test_server_with_config(
             mode.clone(),
-            policies::PoliciesConfig { include_development_policy: true },
+            policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
         )
         .await
         .unwrap();
@@ -1466,7 +1504,7 @@ async fn test_development_policy_enabled_succeeds() {
                 evidence: Some(evidence),
                 endorsements: Some(endorsements.clone()),
                 operator_info: Some(test_dev_operator_info()),
-                policy_hint: policy_hint.into(),
+                selector: hint_selector(policy_hint),
             };
 
             let response = call_certify_attestation(test_server.port, request).await;
@@ -1518,7 +1556,7 @@ async fn test_invalid_or_missing_operator_info_unary() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
         let test_server = create_test_server_with_config(
             mode.clone(),
-            policies::PoliciesConfig { include_development_policy: true },
+            policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
         )
         .await
         .unwrap();
@@ -1567,7 +1605,7 @@ async fn test_invalid_or_missing_operator_info_unary() {
                     operator_domain: d.to_string(),
                     operator_role: r.to_string(),
                 }),
-                policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+                selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
             };
             let status = client.certify_attestation(request).await.unwrap_err();
             assert_eq!(status.code(), tonic::Code::InvalidArgument);
@@ -1583,7 +1621,7 @@ async fn test_invalid_or_missing_operator_info_stream() {
     for mode in [ServerMode::SelfSigning, ServerMode::TcaMock] {
         let test_server = create_test_server_with_config(
             mode.clone(),
-            policies::PoliciesConfig { include_development_policy: true },
+            policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
         )
         .await
         .unwrap();
@@ -1650,7 +1688,7 @@ async fn test_invalid_or_missing_operator_info_stream() {
                             evidence: Some(evidence),
                             endorsements: Some(endorsements),
                             operator_info: op_info,
-                            policy_hint: PolicyHint::DevelopmentCbCertificate.into(),
+                            selector: hint_selector(PolicyHint::DevelopmentCbCertificate),
                         },
                     )),
                 })
@@ -1726,11 +1764,76 @@ async fn test_disallowed_operator_info_returns_error() {
                 operator_domain: domain.to_string(),
                 operator_role: role.to_string(),
             }),
-            policy_hint: PolicyHint::EzEnforcerCbCertificate.into(),
+            selector: hint_selector(PolicyHint::EzEnforcerCbCertificate),
         };
 
         let response = call_certify_attestation(test_server.port, request).await;
         assert!(response.is_err());
+    }
+
+    test_server.shutdown_notify.notify_waiters();
+    test_server.server.await.unwrap();
+}
+
+#[tokio::test]
+async fn test_certify_attestation_policy_name_without_certificate_profile() {
+    let test_server = create_test_server(ServerMode::SelfSigning).await.unwrap();
+
+    let request = CertifyAttestationRequest {
+        csr: vec![],
+        evidence: Some(get_evidence()),
+        endorsements: Some(Endorsements::default()),
+        operator_info: Some(test_dev_operator_info()),
+        selector: params_selector("development", CertificateProfile::Unspecified),
+    };
+
+    match call_certify_attestation(test_server.port, request).await {
+        Ok(_) => panic!("certify_attestation() should fail."),
+        Err(e) => assert!(e
+            .to_string()
+            .contains("`certificate_profile` is required when `policy_name` is specified")),
+    }
+
+    test_server.shutdown_notify.notify_waiters();
+    test_server.server.await.unwrap();
+}
+
+#[tokio::test]
+async fn test_certify_attestation_empty_policy_name() {
+    let test_server = create_test_server(ServerMode::SelfSigning).await.unwrap();
+
+    let request = CertifyAttestationRequest {
+        csr: vec![],
+        evidence: Some(get_evidence()),
+        endorsements: Some(Endorsements::default()),
+        operator_info: Some(test_dev_operator_info()),
+        selector: params_selector("", CertificateProfile::Unrestricted),
+    };
+
+    match call_certify_attestation(test_server.port, request).await {
+        Ok(_) => panic!("certify_attestation() should fail."),
+        Err(e) => assert!(e.to_string().contains("`policy_name` must not be empty")),
+    }
+
+    test_server.shutdown_notify.notify_waiters();
+    test_server.server.await.unwrap();
+}
+
+#[tokio::test]
+async fn test_certify_attestation_no_selector() {
+    let test_server = create_test_server(ServerMode::SelfSigning).await.unwrap();
+
+    let request = CertifyAttestationRequest {
+        csr: vec![],
+        evidence: Some(get_evidence()),
+        endorsements: Some(Endorsements::default()),
+        operator_info: Some(test_dev_operator_info()),
+        selector: None,
+    };
+
+    match call_certify_attestation(test_server.port, request).await {
+        Ok(_) => panic!("certify_attestation() should fail."),
+        Err(e) => assert!(e.to_string().contains("a policy selector is required")),
     }
 
     test_server.shutdown_notify.notify_waiters();

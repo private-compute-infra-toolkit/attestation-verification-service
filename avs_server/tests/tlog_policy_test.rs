@@ -16,9 +16,9 @@
 
 use c2sp::Policy;
 
-const C2SP_POLICY: &str = include_str!("../policies/c2sp_policy.txt");
+const TLOG_POLICY: &str = include_str!("../policies/prod-verifier.policy");
 
 #[test]
-fn c2sp_policy_parses_successfully() {
-    Policy::parse(C2SP_POLICY).expect("c2sp_policy.txt should parse as a valid C2SP policy");
+fn tlog_policy_parses_successfully() {
+    Policy::parse(TLOG_POLICY).expect("prod-verifier.policy should parse as a valid C2SP policy");
 }

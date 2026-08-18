@@ -20,8 +20,8 @@ use oak_proto_rust::oak::attestation::v1::{
     MpmReferenceValue,
 };
 
-/// The embedded C2SP policy file.
-const C2SP_POLICY: &str = include_str!("c2sp_policy.txt");
+/// The embedded C2SP tlog-policy file.
+pub(crate) const PROD_VERIFIER_POLICY: &str = include_str!("prod-verifier.policy");
 
 /// Helper to extract a mutable reference to the `c2sp` field from an optional
 /// `BinaryReferenceValue`.
@@ -120,12 +120,11 @@ fn get_c2sp_fields(policy: &mut Policy) -> Vec<&mut C2sptLogProofReferenceValue>
     c2sp_fields
 }
 
-/// Injects the C2SP policy into all `c2sp` fields in the policy.
+/// Injects `c2sp_policy` into all `c2sp` fields in the policy.
 #[allow(dead_code)]
-pub fn inject_c2sp_policy(policy: &mut Policy) -> anyhow::Result<()> {
-    let policy_str = C2SP_POLICY.to_string();
+pub fn inject_c2sp_policy(policy: &mut Policy, c2sp_policy: &str) -> anyhow::Result<()> {
     for c2sp_field in get_c2sp_fields(policy) {
-        c2sp_field.policy = policy_str.clone();
+        c2sp_field.policy = c2sp_policy.to_string();
     }
     Ok(())
 }
@@ -134,6 +133,10 @@ pub fn inject_c2sp_policy(policy: &mut Policy) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use oak_proto_rust::oak::attestation::v1::reference_values;
+
+    /// Stand-in policy text. `inject_c2sp_policy` stores the string verbatim,
+    /// so its content is irrelevant to these tests.
+    const TEST_C2SP_POLICY: &str = "test c2sp policy";
 
     // --- Mock Helpers for get_c2sp_fields Tests ---
 
@@ -311,7 +314,7 @@ mod tests {
         };
 
         // 2. Invoke the public API
-        inject_c2sp_policy(&mut policy).expect("failed to inject c2sp policy");
+        inject_c2sp_policy(&mut policy, TEST_C2SP_POLICY).expect("failed to inject c2sp policy");
 
         // 3. Construct the expected Policy object (with the c2sp policy injected)
         let expected_policy = Policy {
@@ -324,7 +327,7 @@ mod tests {
                                     EndorsementReferenceValue {
                                         tlog: Some(TLogReferenceValues {
                                             c2sp: Some(C2sptLogProofReferenceValue {
-                                                policy: C2SP_POLICY.to_string(),
+                                                policy: TEST_C2SP_POLICY.to_string(),
                                             }),
                                             ..Default::default()
                                         }),
@@ -370,7 +373,7 @@ mod tests {
         let initial_policy = policy.clone();
 
         // Invoke the public API
-        inject_c2sp_policy(&mut policy).expect("failed to inject c2sp policy");
+        inject_c2sp_policy(&mut policy, TEST_C2SP_POLICY).expect("failed to inject c2sp policy");
 
         // Assert that the policy was not modified at all
         assert_eq!(policy, initial_policy);

@@ -28,6 +28,10 @@ fn default_include_development_policy() -> bool {
     false
 }
 
+fn default_enable_c2sp_tlog() -> bool {
+    false
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
     #[serde(default = "default_use_self_signed_cert")]
@@ -36,6 +40,8 @@ pub struct AppConfig {
     pub tca_endpoint: String,
     #[serde(default = "default_include_development_policy")]
     pub include_development_policy: bool,
+    #[serde(default = "default_enable_c2sp_tlog")]
+    pub enable_c2sp_tlog: bool,
 }
 
 impl Default for AppConfig {
@@ -44,6 +50,7 @@ impl Default for AppConfig {
             use_self_signed_cert: default_use_self_signed_cert(),
             tca_endpoint: default_tca_endpoint(),
             include_development_policy: default_include_development_policy(),
+            enable_c2sp_tlog: default_enable_c2sp_tlog(),
         }
     }
 }
@@ -59,15 +66,17 @@ mod tests {
         assert!(!config.use_self_signed_cert);
         assert_eq!(config.tca_endpoint, "http://10.0.2.100:8008");
         assert!(!config.include_development_policy);
+        assert!(!config.enable_c2sp_tlog);
     }
 
     #[test]
     fn test_custom_values_applied() {
-        let json_str = r#"{"use_self_signed_cert": true, "tca_endpoint": "http://example.com", "include_development_policy": true}"#;
+        let json_str = r#"{"use_self_signed_cert": true, "tca_endpoint": "http://example.com", "include_development_policy": true, "enable_c2sp_tlog": true}"#;
         let config: AppConfig = serde_json::from_str(json_str).unwrap();
         assert!(config.use_self_signed_cert);
         assert_eq!(config.tca_endpoint, "http://example.com");
         assert!(config.include_development_policy);
+        assert!(config.enable_c2sp_tlog);
     }
 
     #[test]

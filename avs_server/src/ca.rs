@@ -13,7 +13,8 @@
 // limitations under the License.
 
 // TODO: b/509861057 - Refactor unsafe Rust logic
-use crate::csr::{ConnectionMode, ProvisionedIdentity};
+use crate::csr::ProvisionedIdentity;
+use avs_proto_rust::avs::CertificateProfile;
 use log::info;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -194,7 +195,7 @@ impl CertificateAuthority {
             }
             bssl_sys::X509_EXTENSION_free(ext);
 
-            if let Err(e) = Self::set_x509_extended_key_usage(x509, &identity.connection_mode) {
+            if let Err(e) = Self::set_x509_extended_key_usage(x509, &identity.certificate_profile) {
                 bssl_sys::X509_free(x509);
                 return Err(e);
             }
@@ -761,14 +762,14 @@ impl CertificateAuthority {
         Ok(trust_domain.to_string())
     }
 
-    /// Dispatches SAN extension creation based on the connection mode.
+    /// Dispatches SAN extension creation based on the certificate profile.
     /// TLS mode uses a DNS SAN; all other modes use a SPIFFE URI SAN.
     fn create_san_extension(
         &self,
         identity: &ProvisionedIdentity,
     ) -> anyhow::Result<*mut bssl_sys::X509_EXTENSION> {
-        match identity.connection_mode {
-            ConnectionMode::Tls => self.create_dns_extension(identity),
+        match identity.certificate_profile {
+            CertificateProfile::Tls => self.create_dns_extension(identity),
             _ => self.create_spiffe_extension(identity),
         }
     }
@@ -870,15 +871,18 @@ impl CertificateAuthority {
         Self::create_san_extension_from_str(&dns_name, bssl_sys::GEN_DNS)
     }
 
-    // Adds the Extended Key Usage extension based on the connection mode.
+    // Adds the Extended Key Usage extension based on the certificate profile.
     fn set_x509_extended_key_usage(
         x509: *mut bssl_sys::X509,
-        connection_mode: &ConnectionMode,
+        certificate_profile: &CertificateProfile,
     ) -> anyhow::Result<()> {
-        let eku_str = match connection_mode {
-            ConnectionMode::Unrestricted => return Ok(()),
-            ConnectionMode::Mtls => "serverAuth,clientAuth",
-            ConnectionMode::Tls => "serverAuth",
+        let eku_str = match certificate_profile {
+            CertificateProfile::Unrestricted => return Ok(()),
+            CertificateProfile::Mtls => "serverAuth,clientAuth",
+            CertificateProfile::Tls => "serverAuth",
+            CertificateProfile::Unspecified => {
+                anyhow::bail!("certificate_profile must be specified")
+            }
         };
         let eku_value = std::ffi::CString::new(eku_str)
             .map_err(|_| anyhow::anyhow!("Failed to create EKU value string"))?;
@@ -1027,14 +1031,14 @@ mod tests {
     use super::*;
 
     fn create_test_identity(
-        connection_mode: ConnectionMode,
+        certificate_profile: CertificateProfile,
         operator_domain: &str,
         operator_role: &str,
     ) -> ProvisionedIdentity {
         let key_pair = CertificateAuthority::create_ca_keypair().unwrap();
         ProvisionedIdentity {
             public_key: key_pair,
-            connection_mode,
+            certificate_profile,
             operator_domain: operator_domain.to_string(),
             operator_role: operator_role.to_string(),
             publisher_domain: "publisher.example.com".to_string(),
@@ -1099,8 +1103,11 @@ mod tests {
     #[test]
     fn test_generate_certificate_spiffe_uri_sunny_day() {
         let ca = CertificateAuthority::new_root().unwrap();
-        let identity =
-            create_test_identity(ConnectionMode::Unrestricted, "prod.google.com", "encrypted-zone");
+        let identity = create_test_identity(
+            CertificateProfile::Unrestricted,
+            "prod.google.com",
+            "encrypted-zone",
+        );
         let cert_der = ca.generate_certificate(&identity).unwrap();
         let entries = extract_san_entries(&cert_der).unwrap();
 
@@ -1113,7 +1120,7 @@ mod tests {
 
         // Also test Mtls mode (which uses SPIFFE URI SAN)
         let identity_mtls =
-            create_test_identity(ConnectionMode::Mtls, "sub.domain.org", "worker_node");
+            create_test_identity(CertificateProfile::Mtls, "sub.domain.org", "worker_node");
         let cert_der_mtls = ca.generate_certificate(&identity_mtls).unwrap();
         let entries_mtls = extract_san_entries(&cert_der_mtls).unwrap();
 
@@ -1128,7 +1135,7 @@ mod tests {
     #[test]
     fn test_generate_certificate_dns_sunny_day() {
         let ca = CertificateAuthority::new_root().unwrap();
-        let identity = create_test_identity(ConnectionMode::Tls, "google.com", "frontend");
+        let identity = create_test_identity(CertificateProfile::Tls, "google.com", "frontend");
         let cert_der = ca.generate_certificate(&identity).unwrap();
         let entries = extract_san_entries(&cert_der).unwrap();
 

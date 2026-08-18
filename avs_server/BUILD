@@ -69,9 +69,6 @@ AVS_SERVER_DEPS = [
 rust_library(
     name = "avs_server_lib",
     srcs = AVS_SERVER_LIB_SRCS,
-    compile_data = [
-        "//avs_server/policies:c2sp_policy.txt",
-    ],
     deps = [
         "//avs_server/policies",
     ] + AVS_SERVER_LIB_DEPS,
@@ -129,10 +126,10 @@ rust_test(
 )
 
 rust_test(
-    name = "c2sp_policy_test",
+    name = "tlog_policy_test",
     size = "small",
-    srcs = ["tests/c2sp_policy_test.rs"],
-    compile_data = ["//avs_server/policies:c2sp_policy.txt"],
+    srcs = ["tests/tlog_policy_test.rs"],
+    compile_data = ["//avs_server/policies:prod-verifier.policy"],
     deps = [
         "@oak//tr/c2sp",
     ],

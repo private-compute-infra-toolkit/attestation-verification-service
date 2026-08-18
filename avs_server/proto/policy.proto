@@ -43,4 +43,15 @@ message Policy {
 
   // Operator domain and role policy for the attested workload.
   OperatorPolicy operator_policy = 5;
+
+  // Unique name identifying this policy within AVS (e.g.,
+  // "private_aratea_server", "encrypted_zone", "prober", "development").
+  string name = 6;
+}
+
+// Bundle of policies for embedded policy registration.
+// Used at build time to package multiple Policy messages into a single
+// binarypb file that is embedded into the server binary.
+message PolicyBundle {
+  repeated Policy policies = 1;
 }

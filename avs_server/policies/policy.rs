@@ -12,59 +12,80 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use avs_proto_rust::avs::{Policy, PolicyHint};
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use avs_proto_rust::avs::{Policy, PolicyBundle};
 use prost::Message;
 
-mod any;
-mod c2sp;
+pub mod any;
+pub mod c2sp;
 mod certs;
 pub mod pes;
 
-// Embedded policy binaries generated from textproto files at build time.
-const PRIVATE_ARATEA_SERVER_POLICY: &[u8] = include_bytes!("private_aratea_server/policy.binarypb");
-const ENCRYPTED_ZONE_POLICY: &[u8] = include_bytes!("encrypted_zone/policy.binarypb");
-const PROBER_POLICY: &[u8] = include_bytes!("prober/policy.binarypb");
-// Only available if PoliciesConfig's `include_development_policy` flag is set.
-const DEVELOPMENT_POLICY: &[u8] = include_bytes!("development/policy.binarypb");
+// Embedded policy bundle generated at build time.
+const POLICY_BUNDLE: &[u8] = include_bytes!("policy_bundle.binarypb");
+
+/// Decodes a `PolicyBundle` binarypb and builds a map of policy name to Policy.
+///
+/// Used by both prod and google_internal policy modules to avoid code
+/// duplication.
+pub fn build_policy_registry(bundle_bytes: &[u8]) -> HashMap<String, Policy> {
+    let bundle = PolicyBundle::decode(bundle_bytes).expect("failed to decode policy bundle");
+    bundle
+        .policies
+        .into_iter()
+        .filter(|p| !p.name.is_empty())
+        .map(|p| (p.name.clone(), p))
+        .collect()
+}
+
+/// Returns the lazily-initialized policy registry.
+fn policy_registry() -> &'static HashMap<String, Policy> {
+    static REGISTRY: OnceLock<HashMap<String, Policy>> = OnceLock::new();
+    REGISTRY.get_or_init(|| build_policy_registry(POLICY_BUNDLE))
+}
 
 /// Configuration options for looking up and validating policies.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PoliciesConfig {
     pub include_development_policy: bool,
+    /// Enables verification of C2SP transparency log inclusion proofs.
+    pub enable_c2sp_tlog: bool,
 }
 
-/// Returns the `Policy` associated with the given `PolicyHint`.
-pub fn get_policy(hint: PolicyHint) -> anyhow::Result<Policy> {
-    get_policy_with_config(hint, &PoliciesConfig::default())
+/// Returns the `Policy` associated with the given policy name.
+pub fn get_policy(name: &str) -> anyhow::Result<Policy> {
+    get_policy_with_config(name, &PoliciesConfig::default())
 }
 
-/// Returns the `Policy` associated with the given `PolicyHint` and
+/// Returns the `Policy` associated with the given policy name and
 /// configuration options.
-pub fn get_policy_with_config(hint: PolicyHint, config: &PoliciesConfig) -> anyhow::Result<Policy> {
-    let policy_bytes = match hint {
-        PolicyHint::Unspecified => {
-            anyhow::bail!("cannot fetch policy for POLICY_HINT_UNSPECIFIED")
-        }
-        PolicyHint::PrivateArateaFrontendCbCertificate => PRIVATE_ARATEA_SERVER_POLICY,
-        PolicyHint::EzEnforcerCbCertificate | PolicyHint::EzTsmCbFrontendCertificate => {
-            ENCRYPTED_ZONE_POLICY
-        }
-        PolicyHint::ProberCbCertificate => PROBER_POLICY,
-        PolicyHint::DevelopmentCbCertificate
-        | PolicyHint::DevelopmentMtlsCbCertificate
-        | PolicyHint::DevelopmentTlsCbCertificate => {
-            if !config.include_development_policy {
-                anyhow::bail!("policy not supported: {:?}", hint);
-            }
-            DEVELOPMENT_POLICY
-        }
-    };
-    let mut policy = Policy::decode(policy_bytes)
-        .map_err(|e| anyhow::anyhow!("failed to decode policy: {}", e))?;
+pub fn get_policy_with_config(name: &str, config: &PoliciesConfig) -> anyhow::Result<Policy> {
+    get_policy_with_config_and_c2sp_policy(name, config, c2sp::PROD_VERIFIER_POLICY)
+}
+
+/// Returns the `Policy` associated with the given policy name and
+/// configuration options, injecting `c2sp_policy` into every C2SP tlog
+/// reference value it contains.
+#[cfg_attr(not(feature = "enable_tessera"), allow(unused_variables))]
+pub fn get_policy_with_config_and_c2sp_policy(
+    name: &str,
+    config: &PoliciesConfig,
+    c2sp_policy: &str,
+) -> anyhow::Result<Policy> {
+    if name == "development" && !config.include_development_policy {
+        anyhow::bail!("policy not supported: {}", name);
+    }
+
+    let mut policy = policy_registry()
+        .get(name)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("unrecognized policy name: {}", name))?;
 
     pes::inject_pes_keys(&mut policy)?;
     #[cfg(feature = "enable_tessera")]
-    {
+    if config.enable_c2sp_tlog {
         // Override all TLog entry verification policies to `any`, allowing any
         // single TLog entry to satisfy verification rather than requiring all.
         //
@@ -73,7 +94,7 @@ pub fn get_policy_with_config(hint: PolicyHint, config: &PoliciesConfig) -> anyh
         // inject the tessera oak reference values into the policy to prevent
         // duplicate policy parsing and tlog injection logic.
         any::override_with_any_strategy(&mut policy)?;
-        c2sp::inject_c2sp_policy(&mut policy)?;
+        c2sp::inject_c2sp_policy(&mut policy, c2sp_policy)?;
     }
 
     Ok(policy)
@@ -84,15 +105,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_policy_unspecified_returns_error() {
-        let result = get_policy(PolicyHint::Unspecified);
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn get_policy_private_aratea_returns_valid_policy() {
-        let policy = get_policy(PolicyHint::PrivateArateaFrontendCbCertificate)
-            .expect("failed to get policy");
+        let policy = get_policy("private_aratea_server").expect("failed to get policy");
+        assert_eq!(policy.name, "private_aratea_server");
         assert_eq!(policy.workload_name, "private-aratea-server");
         let op = policy.operator_policy.expect("missing operator_policy");
         assert_eq!(op.rules.len(), 1);
@@ -102,40 +117,21 @@ mod tests {
     }
 
     #[test]
-    fn get_policy_ez_enforcer_returns_valid_policy() {
-        let policy = get_policy(PolicyHint::EzEnforcerCbCertificate).expect("failed to get policy");
+    fn get_policy_encrypted_zone_returns_valid_policy() {
+        let policy = get_policy("encrypted_zone").expect("failed to get policy");
+        assert_eq!(policy.name, "encrypted_zone");
         assert_eq!(policy.workload_name, "encrypted-zone");
         let op = policy.operator_policy.expect("missing operator_policy");
         assert_eq!(op.rules.len(), 1);
         assert_eq!(op.rules[0].domain, "prod.google.com");
         assert_eq!(op.rules[0].role, "pa-frontend");
         assert!(policy.oak_reference_values.is_some());
-    }
-
-    #[test]
-    fn get_policy_ez_tsm_frontend_returns_valid_policy() {
-        let policy =
-            get_policy(PolicyHint::EzTsmCbFrontendCertificate).expect("failed to get policy");
-        assert_eq!(policy.workload_name, "encrypted-zone");
-        let op = policy.operator_policy.expect("missing operator_policy");
-        assert_eq!(op.rules.len(), 1);
-        assert_eq!(op.rules[0].domain, "prod.google.com");
-        assert_eq!(op.rules[0].role, "pa-frontend");
-        assert!(policy.oak_reference_values.is_some());
-    }
-
-    #[test]
-    fn get_policy_ez_enforcer_and_tsm_frontend_return_same_policy() {
-        let enforcer =
-            get_policy(PolicyHint::EzEnforcerCbCertificate).expect("failed to get policy");
-        let frontend =
-            get_policy(PolicyHint::EzTsmCbFrontendCertificate).expect("failed to get policy");
-        assert_eq!(enforcer, frontend);
     }
 
     #[test]
     fn get_policy_prober_returns_valid_policy() {
-        let policy = get_policy(PolicyHint::ProberCbCertificate).expect("failed to get policy");
+        let policy = get_policy("prober").expect("failed to get policy");
+        assert_eq!(policy.name, "prober");
         assert_eq!(policy.workload_name, "attestation-verification-service-prober");
         let op = policy.operator_policy.expect("missing operator_policy");
         assert_eq!(op.rules.len(), 1);
@@ -145,38 +141,35 @@ mod tests {
     }
 
     #[test]
-    fn get_policy_development_cb_returns_error() {
-        for hint in [
-            PolicyHint::DevelopmentCbCertificate,
-            PolicyHint::DevelopmentMtlsCbCertificate,
-            PolicyHint::DevelopmentTlsCbCertificate,
-        ] {
-            let result =
-                get_policy_with_config(hint, &PoliciesConfig { include_development_policy: false });
-            assert!(result.is_err());
-            assert_eq!(
-                result.unwrap_err().to_string(),
-                format!("policy not supported: {:?}", hint)
-            );
-        }
+    fn get_policy_development_returns_error() {
+        let result = get_policy_with_config(
+            "development",
+            &PoliciesConfig { include_development_policy: false, ..Default::default() },
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "policy not supported: development");
     }
 
     #[test]
-    fn get_policy_development_cb_enabled_returns_valid_policy() {
-        for hint in [
-            PolicyHint::DevelopmentCbCertificate,
-            PolicyHint::DevelopmentMtlsCbCertificate,
-            PolicyHint::DevelopmentTlsCbCertificate,
-        ] {
-            let policy =
-                get_policy_with_config(hint, &PoliciesConfig { include_development_policy: true })
-                    .expect("failed to get policy");
-            assert_eq!(policy.workload_name, "unendorsed-development");
-            let op = policy.operator_policy.expect("missing operator_policy");
-            assert_eq!(op.rules.len(), 1);
-            assert_eq!(op.rules[0].domain, "prod.google.com");
-            assert_eq!(op.rules[0].role, "dev");
-            assert!(policy.oak_reference_values.is_some());
-        }
+    fn get_policy_development_enabled_returns_valid_policy() {
+        let policy = get_policy_with_config(
+            "development",
+            &PoliciesConfig { include_development_policy: true, ..Default::default() },
+        )
+        .expect("failed to get policy");
+        assert_eq!(policy.name, "development");
+        assert_eq!(policy.workload_name, "unendorsed-development");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "dev");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_unrecognized_returns_error() {
+        let result = get_policy("nonexistent_policy");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "unrecognized policy name: nonexistent_policy");
     }
 }

@@ -12,10 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("//avs_server/policies:policy_bundle.bzl", "policy_bundle")
 
 package(
     default_visibility = ["//visibility:public"],
+)
+
+rust_binary(
+    name = "bundle_policies",
+    srcs = ["bundle_policies.rs"],
+    deps = [
+        "//avs_server/proto_rust:avs_proto_rust",
+        "@oak_crates_index//:prost",
+    ],
+)
+
+policy_bundle(
+    name = "policy_bundle",
+    policies = [
+        "//avs_server/policies/private_aratea_server:policy_binarypb",
+        "//avs_server/policies/encrypted_zone:policy_binarypb",
+        "//avs_server/policies/prober:policy_binarypb",
+        "//avs_server/policies/development:policy_binarypb",
+    ],
 )
 
 rust_library(
@@ -28,11 +48,8 @@ rust_library(
         "policy.rs",
     ],
     compile_data = [
-        "c2sp_policy.txt",
-        "//avs_server/policies/private_aratea_server:policy_binarypb",
-        "//avs_server/policies/encrypted_zone:policy_binarypb",
-        "//avs_server/policies/prober:policy_binarypb",
-        "//avs_server/policies/development:policy_binarypb",
+        "prod-verifier.policy",
+        ":policy_bundle",
     ],
     crate_root = "policy.rs",
     deps = [

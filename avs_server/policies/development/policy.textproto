@@ -23,6 +23,7 @@
 publisher_domain: "untrusted.com"
 publisher_role: "none"
 workload_name: "unendorsed-development"
+name: "development"
 operator_policy {
   rules {
     domain: "prod.google.com"

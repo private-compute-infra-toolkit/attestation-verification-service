@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::{ca::KeyPair, operator_info::OperatorInfo};
 use anyhow::Context;
-use avs_proto_rust::avs::PolicyHint;
+use avs_proto_rust::avs::CertificateProfile;
 use oak_attestation_verification::{
     results::get_user_data_payload, AmdSevSnpPolicy, AmdSevSnpTransparentDiceAttestationVerifier,
     FirmwarePolicy, TransparentLayer1Policy, TransparentLayer2Policy, TransparentStage0Policy,
@@ -31,40 +31,12 @@ use oak_proto_rust::oak::attestation::v1::{
 };
 use oak_time_std::clock::SystemTimeClock;
 
-/// Controls which Extended Key Usage extension is set on a provisioned
-/// certificate.
-pub(crate) enum ConnectionMode {
-    /// No EKU extension added.
-    Unrestricted,
-    /// serverAuth + clientAuth (mutual TLS).
-    Mtls,
-    /// serverAuth only (frontend TLS).
-    Tls,
-}
-
-impl From<PolicyHint> for ConnectionMode {
-    fn from(hint: PolicyHint) -> Self {
-        match hint {
-            PolicyHint::Unspecified
-            | PolicyHint::PrivateArateaFrontendCbCertificate
-            | PolicyHint::ProberCbCertificate
-            | PolicyHint::DevelopmentCbCertificate => ConnectionMode::Unrestricted,
-            PolicyHint::EzEnforcerCbCertificate | PolicyHint::DevelopmentMtlsCbCertificate => {
-                ConnectionMode::Mtls
-            }
-            PolicyHint::EzTsmCbFrontendCertificate | PolicyHint::DevelopmentTlsCbCertificate => {
-                ConnectionMode::Tls
-            }
-        }
-    }
-}
-
 /// Identity fields derived from attestation verification, used to construct
 /// the role. The role may be a SPIFFE ID or a DNS name. The role should always
 /// be placed in the provisioned certificate's SAN extension.
 pub(crate) struct ProvisionedIdentity {
     pub(crate) public_key: KeyPair,
-    pub(crate) connection_mode: ConnectionMode,
+    pub(crate) certificate_profile: CertificateProfile,
     pub(crate) operator_domain: String,
     pub(crate) operator_role: String,
     pub(crate) publisher_domain: String,
@@ -130,16 +102,18 @@ fn create_cbt_verifier(
 /// Validate CSR request using policy-based reference values and return the
 /// provisioned identity.
 ///
-/// Looks up the policy by `policy_hint`, extracts the reference values from
+/// Looks up the policy by `policy_name`, extracts the reference values from
 /// the policy's `oak_reference_values` field, constructs a verifier, and
 /// verifies the evidence against those reference values. The returned
 /// `ProvisionedIdentity` is populated from the policy's identity fields.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_csr_request(
     csr_der: &[u8],
     evidence: &Evidence,
     endorsements: &Endorsements,
     nonce: Option<&[u8]>,
-    policy_hint: i32,
+    policy_name: &str,
+    certificate_profile: CertificateProfile,
     operator_info: &OperatorInfo,
     policies_config: &policies::PoliciesConfig,
 ) -> anyhow::Result<ProvisionedIdentity> {
@@ -148,10 +122,8 @@ pub(crate) fn validate_csr_request(
 
     let csr_public_key = verify_csr_and_get_public_key(csr_der)?;
 
-    let hint = PolicyHint::try_from(policy_hint)
-        .map_err(|_| anyhow::anyhow!("unrecognized policy_hint value: {}", policy_hint))?;
-    let policy = policies::get_policy_with_config(hint, policies_config)
-        .context("looking up policy for the given policy_hint")?;
+    let policy = policies::get_policy_with_config(policy_name, policies_config)
+        .context("looking up policy for the given policy_name")?;
 
     let operator_policy =
         policy.operator_policy.as_ref().context("retrieving operator_policy from policy")?;
@@ -189,11 +161,9 @@ pub(crate) fn validate_csr_request(
 
     verify_data_binding(&attestation_results, &csr_public_key, nonce)?;
 
-    let connection_mode: ConnectionMode = hint.into();
-
     Ok(ProvisionedIdentity {
         public_key: csr_public_key,
-        connection_mode,
+        certificate_profile,
         operator_domain: operator_info.domain().to_string(),
         operator_role: operator_info.role().to_string(),
         publisher_domain: policy.publisher_domain,

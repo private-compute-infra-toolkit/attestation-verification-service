@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.12.0 (2026-08-18)
+
+
+### Features
+
+* add a feature flag for tlog verification
+* Add Encrypted Zone staging policy
+* auto-register policies by name from build rules
+* embed a per-environment tlog policy
+* introduce policy name field in Policy proto and textprotos
+* support certification parameters in requests
+
 ## 0.11.0 (2026-08-07)
 
 
