@@ -217,7 +217,11 @@ impl CertificateAuthority {
                 return Err(e);
             }
 
-            if let Err(e) = Self::set_x509_validity(x509, CERT_VALIDITY) {
+            if let Err(e) = Self::set_x509_validity_timestamps(
+                x509,
+                identity.not_before_sec,
+                identity.not_after_sec,
+            ) {
                 bssl_sys::X509_free(x509);
                 return Err(e);
             }
@@ -465,6 +469,24 @@ impl CertificateAuthority {
             // requires conversion from u64 to i64 and requires error checking.
             if bssl_sys::X509_gmtime_adj(not_after, days * SEC_DAYS).is_null() {
                 anyhow::bail!("Failed to set notAfter");
+            }
+        }
+        Ok(())
+    }
+
+    fn set_x509_validity_timestamps(
+        x509: *mut bssl_sys::X509,
+        not_before_sec: i64,
+        not_after_sec: i64,
+    ) -> anyhow::Result<()> {
+        unsafe {
+            let not_before = bssl_sys::X509_getm_notBefore(x509);
+            if bssl_sys::ASN1_TIME_set_posix(not_before, not_before_sec).is_null() {
+                anyhow::bail!("Failed to set notBefore timestamp");
+            }
+            let not_after = bssl_sys::X509_getm_notAfter(x509);
+            if bssl_sys::ASN1_TIME_set_posix(not_after, not_after_sec).is_null() {
+                anyhow::bail!("Failed to set notAfter timestamp");
             }
         }
         Ok(())
@@ -1036,6 +1058,9 @@ mod tests {
         operator_role: &str,
     ) -> ProvisionedIdentity {
         let key_pair = CertificateAuthority::create_ca_keypair().unwrap();
+        let now_sec =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+                as i64;
         ProvisionedIdentity {
             public_key: key_pair,
             certificate_profile,
@@ -1044,6 +1069,8 @@ mod tests {
             publisher_domain: "publisher.example.com".to_string(),
             publisher_role: "enclave".to_string(),
             workload_name: "test-workload".to_string(),
+            not_before_sec: now_sec,
+            not_after_sec: now_sec + (90 * 24 * 60 * 60),
         }
     }
 

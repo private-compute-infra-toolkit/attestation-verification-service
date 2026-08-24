@@ -44,6 +44,7 @@ AVS_SERVER_LIB_DEPS = [
     "@oak//oak_time:oak_time_std",
     "@oak_crates_index//:anyhow",
     "@oak_crates_index//:log",
+    "@oak_crates_index//:prost-types",
     "@oak_crates_index//:serde",
     "@oak_crates_index//:serde_json",
     "@oak_crates_index//:tokio",

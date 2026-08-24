@@ -18,7 +18,6 @@ use std::sync::OnceLock;
 use avs_proto_rust::avs::{Policy, PolicyBundle};
 use prost::Message;
 
-pub mod any;
 pub mod c2sp;
 mod certs;
 pub mod pes;
@@ -86,14 +85,6 @@ pub fn get_policy_with_config_and_c2sp_policy(
     pes::inject_pes_keys(&mut policy)?;
     #[cfg(feature = "enable_tessera")]
     if config.enable_c2sp_tlog {
-        // Override all TLog entry verification policies to `any`, allowing any
-        // single TLog entry to satisfy verification rather than requiring all.
-        //
-        // The functions below are speated from the `inject_pes_keys` function for
-        // clarity, but later `inject_pes_keys` should be renamed and re-used to
-        // inject the tessera oak reference values into the policy to prevent
-        // duplicate policy parsing and tlog injection logic.
-        any::override_with_any_strategy(&mut policy)?;
         c2sp::inject_c2sp_policy(&mut policy, c2sp_policy)?;
     }
 

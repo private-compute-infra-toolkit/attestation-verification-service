@@ -41,7 +41,6 @@ policy_bundle(
 rust_library(
     name = "policies",
     srcs = [
-        "any.rs",
         "c2sp.rs",
         "certs.rs",
         "pes.rs",

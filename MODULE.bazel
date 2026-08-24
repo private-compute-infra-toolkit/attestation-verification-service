@@ -221,9 +221,9 @@ archive_override(
 bazel_dep(name = "oak", version = "0.0.0")
 archive_override(
     module_name = "oak",
-    sha256 = "77c890f778da904db4d665256edbcb5f7ffdea0bb07b07c077c6a49847d4f8cd",
-    strip_prefix = "oak-4d21ee63ce249c3647a9d6ef6ba78e816237c5f5",
-    url = "https://github.com/project-oak/oak/archive/4d21ee63ce249c3647a9d6ef6ba78e816237c5f5.tar.gz",
+    sha256 = "a638f5e0d48c25d725bfa2b2e9eb5000d3079169f39b8eb9ebe064ecbcb41f35",
+    strip_prefix = "oak-33e1d2930ac866d1a229402f82bbd9d696b70baa",
+    url = "https://github.com/project-oak/oak/archive/33e1d2930ac866d1a229402f82bbd9d696b70baa.tar.gz",
 )
 
 oak_aliased_crates = use_extension(

@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.13.0 (2026-08-24)
+
+
+### Dependencies
+
+* **deps:** Update Oak dependency
+* **deps:** Update tlog policies (diff hash: c074fde8)
+
+
+### Features
+
+* accept C2SP proofs in the tlog policies
+* set certificate validity based on endorsments validity
+
+
+### Bug Fixes
+
+* keep refreshed tlog policies non-executable
+
 ## 0.12.0 (2026-08-18)
 
 

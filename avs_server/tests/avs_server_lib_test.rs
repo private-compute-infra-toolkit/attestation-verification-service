@@ -341,7 +341,7 @@ fn validate_cert_chain(
     let not_after_sys = tbs.validity.not_after.to_system_time();
     let not_after: chrono::DateTime<Utc> = not_after_sys.into();
     assert!(now >= not_before - Duration::seconds(60));
-    let expected_not_after = now + Duration::days(365);
+    let expected_not_after = now + Duration::days(90);
     let delta = expected_not_after - not_after;
     assert!(
         delta.num_seconds().abs() < 120,

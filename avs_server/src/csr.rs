@@ -14,14 +14,15 @@
 // limitations under the License.
 //
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{ca::KeyPair, operator_info::OperatorInfo};
 use anyhow::Context;
 use avs_proto_rust::avs::CertificateProfile;
 use oak_attestation_verification::{
-    results::get_user_data_payload, AmdSevSnpPolicy, AmdSevSnpTransparentDiceAttestationVerifier,
-    FirmwarePolicy, TransparentLayer1Policy, TransparentLayer2Policy, TransparentStage0Policy,
+    results::{get_user_data_payload, get_validity},
+    AmdSevSnpPolicy, AmdSevSnpTransparentDiceAttestationVerifier, FirmwarePolicy,
+    TransparentLayer1Policy, TransparentLayer2Policy, TransparentStage0Policy,
 };
 use oak_attestation_verification_types::verifier::AttestationVerifier;
 use oak_proto_rust::oak::attestation::v1::{
@@ -30,6 +31,9 @@ use oak_proto_rust::oak::attestation::v1::{
     CbTransparentReferenceValues, Endorsements, Evidence, KernelLayerReferenceValues,
 };
 use oak_time_std::clock::SystemTimeClock;
+
+// Three months (90 days) fallback validity.
+const FALLBACK_VALIDITY: Duration = Duration::from_secs(90 * 24 * 60 * 60);
 
 /// Identity fields derived from attestation verification, used to construct
 /// the role. The role may be a SPIFFE ID or a DNS name. The role should always
@@ -42,6 +46,8 @@ pub(crate) struct ProvisionedIdentity {
     pub(crate) publisher_domain: String,
     pub(crate) publisher_role: String,
     pub(crate) workload_name: String,
+    pub(crate) not_before_sec: i64,
+    pub(crate) not_after_sec: i64,
 }
 
 /// Constructs an `AmdSevSnpTransparentDiceAttestationVerifier` from individual
@@ -97,6 +103,40 @@ fn create_cbt_verifier(
         layer1_rvs,
         layer2_rvs,
     ))
+}
+
+/// Extracts the validity period by intersecting the endorsement validity
+/// windows returned across all event attestation results. If no endorsement
+/// validity windows are present, falls back to `fallback_duration`.
+fn extract_validity_with_fallback(
+    attestation_results: &AttestationResults,
+    current_time_sec: i64,
+    fallback_duration: Duration,
+) -> anyhow::Result<(i64, i64)> {
+    let mut not_before_sec = current_time_sec;
+    let mut not_after_sec = current_time_sec + (fallback_duration.as_secs() as i64);
+
+    for event_attestation_result in &attestation_results.event_attestation_results {
+        if let Some(validity) = get_validity(event_attestation_result) {
+            if let Some(nb) = &validity.not_before {
+                not_before_sec = std::cmp::max(not_before_sec, nb.seconds);
+            }
+            if let Some(na) = &validity.not_after {
+                not_after_sec = std::cmp::min(not_after_sec, na.seconds);
+            }
+        }
+    }
+
+    anyhow::ensure!(
+        not_after_sec > not_before_sec,
+        "invalid validity window: not_after ({not_after_sec}) must be greater than not_before ({not_before_sec})"
+    );
+    anyhow::ensure!(
+        not_after_sec > current_time_sec,
+        "endorsement validity has expired: not_after ({not_after_sec}) is in the past (now is {current_time_sec})"
+    );
+
+    Ok((not_before_sec, not_after_sec))
 }
 
 /// Validate CSR request using policy-based reference values and return the
@@ -161,6 +201,13 @@ pub(crate) fn validate_csr_request(
 
     verify_data_binding(&attestation_results, &csr_public_key, nonce)?;
 
+    let current_time_sec = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("getting current system time")?
+        .as_secs() as i64;
+    let (not_before_sec, not_after_sec) =
+        extract_validity_with_fallback(&attestation_results, current_time_sec, FALLBACK_VALIDITY)?;
+
     Ok(ProvisionedIdentity {
         public_key: csr_public_key,
         certificate_profile,
@@ -169,6 +216,8 @@ pub(crate) fn validate_csr_request(
         publisher_domain: policy.publisher_domain,
         publisher_role: policy.publisher_role,
         workload_name: policy.workload_name,
+        not_before_sec,
+        not_after_sec,
     })
 }
 
@@ -292,5 +341,122 @@ fn verify_csr_and_get_public_key(csr_der: &[u8]) -> anyhow::Result<KeyPair> {
         bssl_sys::X509_REQ_free(csr);
 
         Ok(KeyPair::new(pkey))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oak_proto_rust::oak::{attestation::v1::EventAttestationResults, Validity};
+    use prost_types::Timestamp;
+
+    fn make_timestamp(seconds: i64) -> Timestamp {
+        Timestamp { seconds, nanos: 0 }
+    }
+
+    #[test]
+    fn extract_validity_with_fallback_no_endorsements_uses_fallback() {
+        let attestation_results = AttestationResults {
+            event_attestation_results: vec![
+                EventAttestationResults::default(),
+                EventAttestationResults::default(),
+            ],
+            ..Default::default()
+        };
+        let now = 1_000_000;
+        let fallback = Duration::from_secs(500_000);
+        let (nb, na) = extract_validity_with_fallback(&attestation_results, now, fallback).unwrap();
+        assert_eq!(nb, now);
+        assert_eq!(na, now + 500_000);
+    }
+
+    #[test]
+    fn extract_validity_with_fallback_single_endorsement() {
+        let attestation_results = AttestationResults {
+            event_attestation_results: vec![EventAttestationResults {
+                valid: Some(Validity {
+                    not_before: Some(make_timestamp(900_000)),
+                    not_after: Some(make_timestamp(2_000_000)),
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let now = 1_000_000;
+        let fallback = Duration::from_secs(5_000_000);
+        let (nb, na) = extract_validity_with_fallback(&attestation_results, now, fallback).unwrap();
+        assert_eq!(nb, now);
+        assert_eq!(na, 2_000_000);
+    }
+
+    #[test]
+    fn extract_validity_with_fallback_intersects_multiple_windows() {
+        let attestation_results = AttestationResults {
+            event_attestation_results: vec![
+                EventAttestationResults {
+                    valid: Some(Validity {
+                        not_before: Some(make_timestamp(1_050_000)),
+                        not_after: Some(make_timestamp(3_000_000)),
+                    }),
+                    ..Default::default()
+                },
+                EventAttestationResults {
+                    valid: Some(Validity {
+                        not_before: Some(make_timestamp(950_000)),
+                        not_after: Some(make_timestamp(2_000_000)),
+                    }),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let now = 1_000_000;
+        let fallback = Duration::from_secs(5_000_000);
+        let (nb, na) = extract_validity_with_fallback(&attestation_results, now, fallback).unwrap();
+        assert_eq!(nb, 1_050_000);
+        assert_eq!(na, 2_000_000);
+    }
+
+    #[test]
+    fn extract_validity_with_fallback_rejects_expired_window() {
+        let attestation_results = AttestationResults {
+            event_attestation_results: vec![EventAttestationResults {
+                valid: Some(Validity {
+                    not_before: Some(make_timestamp(500_000)),
+                    not_after: Some(make_timestamp(900_000)),
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let now = 1_000_000;
+        let fallback = Duration::from_secs(500_000);
+        assert!(extract_validity_with_fallback(&attestation_results, now, fallback).is_err());
+    }
+
+    #[test]
+    fn extract_validity_with_fallback_rejects_inverted_window() {
+        let attestation_results = AttestationResults {
+            event_attestation_results: vec![
+                EventAttestationResults {
+                    valid: Some(Validity {
+                        not_before: Some(make_timestamp(2_000_000)),
+                        not_after: Some(make_timestamp(3_000_000)),
+                    }),
+                    ..Default::default()
+                },
+                EventAttestationResults {
+                    valid: Some(Validity {
+                        not_before: Some(make_timestamp(1_000_000)),
+                        not_after: Some(make_timestamp(1_500_000)),
+                    }),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let now = 1_000_000;
+        let fallback = Duration::from_secs(5_000_000);
+        assert!(extract_validity_with_fallback(&attestation_results, now, fallback).is_err());
     }
 }
