@@ -192,7 +192,9 @@ fn extract_san_dns(der: &[u8]) -> anyhow::Result<Vec<String>> {
     Ok(result)
 }
 
-fn get_spiffe_id(extensions: &Option<Vec<x509_cert::ext::Extension>>) -> anyhow::Result<String> {
+fn get_spiffe_id(
+    extensions: &Option<Vec<x509_cert::ext::Extension>>,
+) -> anyhow::Result<(bool, String)> {
     const SAN_OID: x509_cert::spki::ObjectIdentifier =
         x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.17");
     if let Some(extensions) = extensions {
@@ -202,14 +204,16 @@ fn get_spiffe_id(extensions: &Option<Vec<x509_cert::ext::Extension>>) -> anyhow:
                 if uris.len() != 1 {
                     anyhow::bail!("There are multiple URI fields in subject alt name extension");
                 }
-                return Ok(uris[0].clone());
+                return Ok((ext.critical, uris[0].clone()));
             }
         }
     }
     anyhow::bail!("SPIFFE ID not found in certificate extensions")
 }
 
-fn get_dns_name(extensions: &Option<Vec<x509_cert::ext::Extension>>) -> anyhow::Result<String> {
+fn get_dns_name(
+    extensions: &Option<Vec<x509_cert::ext::Extension>>,
+) -> anyhow::Result<(bool, String)> {
     const SAN_OID: x509_cert::spki::ObjectIdentifier =
         x509_cert::spki::ObjectIdentifier::new_unwrap("2.5.29.17");
     if let Some(extensions) = extensions {
@@ -224,7 +228,7 @@ fn get_dns_name(extensions: &Option<Vec<x509_cert::ext::Extension>>) -> anyhow::
                 if !uris.is_empty() {
                     anyhow::bail!("Expected no URI SANs when DNS SAN is present, found {:?}", uris);
                 }
-                return Ok(dns_names[0].clone());
+                return Ok((ext.critical, dns_names[0].clone()));
             }
         }
     }
@@ -319,6 +323,10 @@ fn validate_cert_chain(
     let leaf_cert = x509_cert::Certificate::from_der(&certificate_chain[0]).unwrap();
     let tbs = &leaf_cert.tbs_certificate;
     assert_eq!(tbs.issuer.to_string(), expected_issuer);
+    assert!(
+        tbs.subject.0.is_empty(),
+        "Leaf certificate subject name must be an empty sequence per RFC 5280 Section 4.2.1.6"
+    );
 
     // Check that the public key in the cert matches the CSR's public key
     // Note that there is a difference in how the two PEMs are formatted. One
@@ -351,13 +359,24 @@ fn validate_cert_chain(
         expected_not_after
     );
 
-    // Validate that the certificate SAN matches the expected type and value.
+    // Validate that the certificate SAN matches the expected type and value,
+    // and is marked critical per RFC 5280 Section 4.2.1.6 (since leaf subject is
+    // empty).
     match expected_san {
         ExpectedSan::SpiffeUri(expected_uri) => {
-            assert_eq!(get_spiffe_id(&tbs.extensions).unwrap(), *expected_uri);
+            let (is_critical, actual_uri) = get_spiffe_id(&tbs.extensions).unwrap();
+            assert!(
+                is_critical,
+                "Violation of RFC 5280 Section 4.2.1.6: Subject Alternative Name extension must be critical when subject name is empty"
+            );
+            assert_eq!(actual_uri, *expected_uri);
         }
         ExpectedSan::DnsName(expected_dns) => {
-            let actual_dns = get_dns_name(&tbs.extensions).unwrap();
+            let (is_critical, actual_dns) = get_dns_name(&tbs.extensions).unwrap();
+            assert!(
+                is_critical,
+                "Violation of RFC 5280 Section 4.2.1.6: Subject Alternative Name extension must be critical when subject name is empty"
+            );
             assert_valid_dns_name(&actual_dns);
             assert_eq!(actual_dns, *expected_dns);
         }

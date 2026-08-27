@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.14.0 (2026-08-27)
+
+
+### Dependencies
+
+* **deps:** Update policies (diff hash: 310ae365)
+
+
+### Bug Fixes
+
+* mark SAN extension as critical in generated certificates
+
 ## 0.13.0 (2026-08-24)
 
 

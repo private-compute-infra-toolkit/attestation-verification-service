@@ -844,10 +844,12 @@ impl CertificateAuthority {
             }
             // `gens` now owns `general_name` (and nested `ia5`).
 
-            // 5. Serialize GENERAL_NAMES into X509_EXTENSION via DER encoding (i2d)
+            // 5. Serialize GENERAL_NAMES into X509_EXTENSION via DER encoding (i2d).
+            // Per RFC 5280 Section 4.2.1.6, if the certificate subject name is empty,
+            // the subjectAltName extension MUST be marked as critical.
             let ext = bssl_sys::X509V3_EXT_i2d(
                 bssl_sys::NID_subject_alt_name,
-                /* crit= */ 0,
+                /* crit= */ 1,
                 gens as *mut std::os::raw::c_void,
             );
 
@@ -867,7 +869,7 @@ impl CertificateAuthority {
         identity: &ProvisionedIdentity,
     ) -> anyhow::Result<*mut bssl_sys::X509_EXTENSION> {
         // Add SPIFFE ID as `subject_alt_name` (OID 2.5.29.17) extension
-        // and URI type.
+        // and URI type (critical per RFC 5280 Section 4.2.1.6).
         let spiffe_id = format!(
             "spiffe://{}/operator/{}/{}/publisher/{}/{}/workload/{}",
             self.trust_domain,
@@ -885,7 +887,8 @@ impl CertificateAuthority {
         identity: &ProvisionedIdentity,
     ) -> anyhow::Result<*mut bssl_sys::X509_EXTENSION> {
         // Add a DNS name as `subject_alt_name` (OID 2.5.29.17) extension
-        // in the format: <operator_role>.<operator_domain>.<trust_domain>.
+        // in the format: <operator_role>.<operator_domain>.<trust_domain>
+        // (critical per RFC 5280 Section 4.2.1.6).
         let dns_name = format!(
             "{}.{}.{}",
             identity.operator_role, identity.operator_domain, self.trust_domain,
@@ -1074,7 +1077,7 @@ mod tests {
         }
     }
 
-    fn extract_san_entries(cert_der: &[u8]) -> anyhow::Result<Vec<(i32, String)>> {
+    fn extract_san_entries(cert_der: &[u8]) -> anyhow::Result<(bool, Vec<(i32, String)>)> {
         unsafe {
             let mut ptr = cert_der.as_ptr();
             let x509 = bssl_sys::d2i_X509(std::ptr::null_mut(), &mut ptr, cert_der.len() as i64);
@@ -1093,6 +1096,8 @@ mod tests {
                 bssl_sys::X509_free(x509);
                 anyhow::bail!("Failed to retrieve SAN extension");
             }
+
+            let is_critical = bssl_sys::X509_EXTENSION_get_critical(ext) == 1;
 
             let gens = bssl_sys::X509V3_EXT_d2i(ext) as *mut bssl_sys::GENERAL_NAMES;
             if gens.is_null() {
@@ -1123,7 +1128,7 @@ mod tests {
             bssl_sys::GENERAL_NAMES_free(gens);
             bssl_sys::X509_free(x509);
 
-            Ok(entries)
+            Ok((is_critical, entries))
         }
     }
 
@@ -1136,8 +1141,9 @@ mod tests {
             "encrypted-zone",
         );
         let cert_der = ca.generate_certificate(&identity).unwrap();
-        let entries = extract_san_entries(&cert_der).unwrap();
+        let (is_critical, entries) = extract_san_entries(&cert_der).unwrap();
 
+        assert!(is_critical, "SAN extension must be marked critical per RFC 5280 Section 4.2.1.6");
         assert_eq!(entries.len(), 1, "Expected exactly 1 SAN entry");
         assert_eq!(entries[0].0, bssl_sys::GEN_URI, "Expected GEN_URI type");
         assert_eq!(
@@ -1149,8 +1155,12 @@ mod tests {
         let identity_mtls =
             create_test_identity(CertificateProfile::Mtls, "sub.domain.org", "worker_node");
         let cert_der_mtls = ca.generate_certificate(&identity_mtls).unwrap();
-        let entries_mtls = extract_san_entries(&cert_der_mtls).unwrap();
+        let (is_critical_mtls, entries_mtls) = extract_san_entries(&cert_der_mtls).unwrap();
 
+        assert!(
+            is_critical_mtls,
+            "SAN extension must be marked critical in Mtls mode per RFC 5280 Section 4.2.1.6"
+        );
         assert_eq!(entries_mtls.len(), 1, "Expected exactly 1 SAN entry in Mtls mode");
         assert_eq!(entries_mtls[0].0, bssl_sys::GEN_URI, "Expected GEN_URI type");
         assert_eq!(
@@ -1164,8 +1174,12 @@ mod tests {
         let ca = CertificateAuthority::new_root().unwrap();
         let identity = create_test_identity(CertificateProfile::Tls, "google.com", "frontend");
         let cert_der = ca.generate_certificate(&identity).unwrap();
-        let entries = extract_san_entries(&cert_der).unwrap();
+        let (is_critical, entries) = extract_san_entries(&cert_der).unwrap();
 
+        assert!(
+            is_critical,
+            "SAN extension must be marked critical in TLS mode per RFC 5280 Section 4.2.1.6"
+        );
         assert_eq!(entries.len(), 1, "Expected exactly 1 SAN entry");
         assert_eq!(entries[0].0, bssl_sys::GEN_DNS, "Expected GEN_DNS type");
         assert_eq!(entries[0].1, "frontend.google.com.prod.google.com.avs.pcit.goog");
