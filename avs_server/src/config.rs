@@ -82,8 +82,8 @@ mod tests {
     #[test]
     fn test_legacy_fields_ignored_and_defaults_applied() {
         // "use_tca_cert_chain" is a legacy field and should be ignored.
-        // Since "use_self_signed_cert" is missing, it should fallback to default
-        // (false).
+        // Since "use_self_signed_cert" is missing, it should fallback to
+        // default (false).
         let json_str = r#"{"use_tca_cert_chain": true, "tca_endpoint": "http://custom-tca:9000"}"#;
         let config: AppConfig = serde_json::from_str(json_str).unwrap();
         assert!(!config.use_self_signed_cert);

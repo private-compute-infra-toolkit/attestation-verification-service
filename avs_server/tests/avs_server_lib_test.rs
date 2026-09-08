@@ -330,8 +330,9 @@ fn validate_cert_chain(
 
     // Check that the public key in the cert matches the CSR's public key
     // Note that there is a difference in how the two PEMs are formatted. One
-    // leverages RFC 7468 (`\r\n`) and the other RFC 1421 (`\n`). To assert the two
-    // PEMs are equal, we strip the `\r` characters from the RFC 7468 cert's PEM.
+    // leverages RFC 7468 (`\r\n`) and the other RFC 1421 (`\n`). To assert the
+    // two PEMs are equal, we strip the `\r` characters from the RFC 7468
+    // cert's PEM.
     let cert_pub_key_der = tbs.subject_public_key_info.to_der().unwrap();
     let cert_pub_key_pem =
         pem::encode(&pem::Pem::new("PUBLIC KEY", cert_pub_key_der)).replace('\r', "");
@@ -360,8 +361,8 @@ fn validate_cert_chain(
     );
 
     // Validate that the certificate SAN matches the expected type and value,
-    // and is marked critical per RFC 5280 Section 4.2.1.6 (since leaf subject is
-    // empty).
+    // and is marked critical per RFC 5280 Section 4.2.1.6 (since leaf subject
+    // is empty).
     match expected_san {
         ExpectedSan::SpiffeUri(expected_uri) => {
             let (is_critical, actual_uri) = get_spiffe_id(&tbs.extensions).unwrap();
@@ -462,8 +463,8 @@ fn validate_cert_chain(
     assert!(!ku.key_encipherment(), "Key Usage must NOT include keyEncipherment");
 
     // -------------------------------------------------------------------------
-    // RFC 5280 Section 4.1.2.4 & 4.2.1.1 Compliance Assertions (Requirements R1 &
-    // R2)
+    // RFC 5280 Section 4.1.2.4 & 4.2.1.1 Compliance Assertions (Requirements R1
+    // & R2)
     // -------------------------------------------------------------------------
     assert!(
         certificate_chain.len() >= 2,
@@ -940,7 +941,8 @@ impl TcaClient for MockTcaClient {
             .signed_by(&avs_pub_key, &ca_issuer)
             .map_err(|e| CertificateError::Platform(e.to_string()))?;
 
-        // AVS issued certificate followed by the mock self-signed TCA certificate.
+        // AVS issued certificate followed by the mock self-signed TCA
+        // certificate.
         Ok(CertificateChain(vec![
             Certificate(avs_cert.der().to_vec()),
             Certificate(self.root_ca_cert_der.clone()),
@@ -1140,7 +1142,8 @@ async fn test_certify_attestation_before_generate_key() {
     let mut client =
         AttestationVerificationClient::connect(format!("http://localhost:{}", port)).await.unwrap();
 
-    // Attempt certify_attestation without calling generate_avs_signing_key first.
+    // Attempt certify_attestation without calling generate_avs_signing_key
+    // first.
     static SUBJECT: &str = "example.com";
     let (csr_der, _) = generate_csr(SUBJECT).unwrap();
     let request = CertifyAttestationRequest {

@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.15.0 (2026-09-08)
+
+
+### Dependencies
+
+* **deps:** update binary checksums and policies
+* **deps:** Update Oak dependency
+* **deps:** update Oak pin to 973bf96c
+* **deps:** Update policies (diff hash: 6d564ea1)
+* **deps:** Update policies (diff hash: f9243808)
+
+
+### Features
+
+* compile C2SP tlog verification into the staging enclave
+* replace toolchains_llvm with toolchains_llvm_bootstrapped
+
 ## 0.14.0 (2026-08-27)
 
 

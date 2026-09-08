@@ -34,7 +34,7 @@ jobs:
 
       - name: 'Run tests'
         run: |
-          devkit/build bazel test --config=run_all_tests //...
+          devkit/build bazel test //...
 
       - name: 'Upload devkit logs'
         if: 'always()'

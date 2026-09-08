@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-load("@com_google_protobuf//bazel/toolchains:proto_toolchain.bzl", "proto_toolchain")
 load("@rules_rust//rust:defs.bzl", "rust_library_group")
 load("@rules_rust_prost//:defs.bzl", "rust_prost_toolchain")
 
@@ -26,12 +25,6 @@ package_group(
     packages = [
         "//...",
     ],
-)
-
-# Implicitly creates `{name}_toolchain`.
-proto_toolchain(
-    name = "proto",
-    proto_compiler = "@com_google_protobuf//:protoc",
 )
 
 rust_library_group(

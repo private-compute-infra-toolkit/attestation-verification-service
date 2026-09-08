@@ -266,8 +266,8 @@ fn verify_data_binding(
 ) -> anyhow::Result<()> {
     let mut payload = Vec::new();
     for event_attestation_result in &attestation_results.event_attestation_results {
-        // TODO: b/484977728 - generalizing quote fetching for quotes that are not
-        // in `Evidence` under the USER_DATA_PAYLOAD_ID tag.
+        // TODO: b/484977728 - generalizing quote fetching for quotes that are
+        // not in `Evidence` under the USER_DATA_PAYLOAD_ID tag.
         if let Some(user_data_payload) = get_user_data_payload(event_attestation_result) {
             payload = user_data_payload.clone();
             break;
@@ -281,8 +281,8 @@ fn verify_data_binding(
     // No nonce is expected, check if the public key matches.
     let Some(expected_nonce) = nonce else {
         // Retrieve the quoted public key from the attestation results.
-        // Here we assume that the public key in the attestation results is in DER
-        // format.
+        // Here we assume that the public key in the attestation results is in
+        // DER format.
         let quoted_public_key = KeyPair::from_bytes(&payload)
             .context("failed to parse public key from attestation results")?;
 

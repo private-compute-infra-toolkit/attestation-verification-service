@@ -21,14 +21,14 @@ module(
     version = "0.0.1",
 )
 
-bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
-bazel_dep(name = "rules_cc", version = "0.2.14")
+bazel_dep(name = "protobuf", version = "33.4", repo_name = "com_google_protobuf")
+bazel_dep(name = "rules_cc", version = "0.2.19")
 bazel_dep(name = "rules_oci", version = "2.2.6")
 bazel_dep(name = "rules_proto", version = "7.1.0")
-bazel_dep(name = "rules_rust", version = "0.68.1")
-bazel_dep(name = "rules_rust_prost", version = "0.68.0")
+bazel_dep(name = "rules_python", version = "1.9.0")
+bazel_dep(name = "rules_rust", version = "0.70.0")
+bazel_dep(name = "rules_rust_prost", version = "0.70.0")
 bazel_dep(name = "tar.bzl", version = "0.6.0")
-bazel_dep(name = "toolchains_protoc", version = "0.5.0")
 bazel_dep(name = "googleapis", version = "0.0.0-20251211-05f65958")
 single_version_override(
     module_name = "googleapis",
@@ -40,36 +40,12 @@ single_version_override(
     version = "3.16.0",
 )
 
-http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.2.4")
 
-http_archive(
-    name = "confidential-federated-compute",
-    build_file_content = """
-filegroup(
-  name = "sysroot",
-  srcs = glob(["*/**"]),
-  visibility = ["//visibility:public"],
+# Configure hermetic C++ toolchain
+register_toolchains(
+    "@toolchains_llvm_bootstrapped//toolchain:linux_amd64",
 )
-""",
-    sha256 = "f58c289b3ccb28895ad8ca408ac366e709037088e8b5c28aca18212adc18c31e",
-    urls = ["https://github.com/google-parfait/confidential-federated-compute/releases/download/sysroot-20250618/sysroot.tar.xz"],
-)
-
-bazel_dep(name = "toolchains_llvm", version = "1.6.0")
-
-llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
-llvm.toolchain(
-    name = "llvm_toolchain_with_custom_sysroot",
-    llvm_version = "20.1.0",
-)
-llvm.sysroot(
-    name = "llvm_toolchain_with_custom_sysroot",
-    label = "@confidential-federated-compute//:sysroot",
-    targets = ["linux-x86_64"],
-)
-use_repo(llvm, "llvm_toolchain_with_custom_sysroot")
-
-register_toolchains("@llvm_toolchain_with_custom_sysroot//:all")
 
 # Register the Rust toolchain.
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
@@ -83,29 +59,9 @@ register_toolchains("@rust_toolchains//:all")
 
 register_toolchains(
     "@//:prost_toolchain",
-    "@//:proto_toolchain",
 )
-
-register_toolchains("@rust_toolchains//:all")
 
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
-crate.spec(
-    package = "env_logger",
-    version = "0.11.8",
-)
-crate.spec(
-    package = "log",
-    version = "0.4.29",
-)
-crate.spec(
-    package = "prost",
-    version = "0.14.1",
-)
-crate.spec(
-    default_features = False,
-    package = "prost-types",
-    version = "0.14.1",
-)
 crate.spec(
     package = "protoc-gen-prost",
     version = "0.5.0",
@@ -121,23 +77,6 @@ crate.spec(
 crate.annotation(
     crate = "protoc-gen-tonic",
     gen_binaries = ["protoc-gen-tonic"],
-)
-crate.spec(
-    features = [
-        "full",
-        "macros",
-    ],
-    package = "tokio",
-    version = "1.36.0",
-)
-crate.spec(
-    features = ["transport"],
-    package = "tonic",
-    version = "0.14.2",
-)
-crate.spec(
-    package = "tonic-prost",
-    version = "0.14.2",
 )
 crate.spec(
     package = "rcgen",
@@ -160,29 +99,8 @@ crate.spec(
     version = "0.4.8",
 )
 crate.spec(
-    features = [
-        "full",
-        "macros",
-    ],
-    package = "tokio",
-    version = "1.36.0",
-)
-crate.spec(
-    features = ["transport"],
-    package = "tonic",
-    version = "0.14.2",
-)
-crate.spec(
-    package = "tonic-prost",
-    version = "0.14.2",
-)
-crate.spec(
     package = "thiserror",
     version = "1.0",
-)
-crate.spec(
-    package = "async-trait",
-    version = "0.1",
 )
 crate.spec(
     package = "glob",
@@ -221,9 +139,9 @@ archive_override(
 bazel_dep(name = "oak", version = "0.0.0")
 archive_override(
     module_name = "oak",
-    sha256 = "a638f5e0d48c25d725bfa2b2e9eb5000d3079169f39b8eb9ebe064ecbcb41f35",
-    strip_prefix = "oak-33e1d2930ac866d1a229402f82bbd9d696b70baa",
-    url = "https://github.com/project-oak/oak/archive/33e1d2930ac866d1a229402f82bbd9d696b70baa.tar.gz",
+    sha256 = "700268138b1d32c75c9a63fd6fd0d95ba292d39b0310821693932d6aed27aeee",
+    strip_prefix = "oak-973bf96c8521523d360a90da718a7794cfe1c98c",
+    url = "https://github.com/project-oak/oak/archive/973bf96c8521523d360a90da718a7794cfe1c98c.tar.gz",
 )
 
 oak_aliased_crates = use_extension(
@@ -242,4 +160,16 @@ bazel_dep(name = "pcit_api", version = "0.0.0")
 local_path_override(
     module_name = "pcit_api",
     path = "third_party/tca-sdk/api",
+)
+
+single_version_override(
+    module_name = "grpc",
+    patches = ["//third_party/grpc:grpc_python_versions.patch"],
+    version = "1.78.0",
+)
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    ignore_root_user_error = True,
+    python_version = "3.13",
 )

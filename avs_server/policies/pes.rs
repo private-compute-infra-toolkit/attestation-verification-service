@@ -246,7 +246,8 @@ mod tests {
             KernelLayerReferenceValues, ReferenceValues, RootLayerReferenceValues,
         };
 
-        // 1. Construct a Policy where all 6 possible PES locations are populated
+        // 1. Construct a Policy where all 6 possible PES locations are
+        //    populated
         let mut policy = Policy {
             oak_reference_values: Some(ReferenceValues {
                 r#type: Some(reference_values::Type::Cbt(CbTransparentReferenceValues {
@@ -284,7 +285,8 @@ mod tests {
         // 2. Invoke get_pes_fields
         let fields = get_pes_fields(&mut policy);
 
-        // 3. Assert that all 9 fields across the 4 layers were successfully extracted
+        // 3. Assert that all 9 fields across the 4 layers were successfully
+        //    extracted
         assert_eq!(fields.len(), 9);
     }
 
@@ -295,7 +297,8 @@ mod tests {
             KernelLayerReferenceValues, ReferenceValues,
         };
 
-        // 1. Construct a Policy where only some layers and fields are populated:
+        // 1. Construct a Policy where only some layers and fields are
+        //    populated:
         //    - root_layer is None
         //    - kernel_layer: kernel is Some, init_ram_fs is None
         //    - layer1 is None
@@ -323,7 +326,8 @@ mod tests {
         // 2. Invoke get_pes_fields
         let fields = get_pes_fields(&mut policy);
 
-        // 3. Assert that exactly 3 fields were extracted (from kernel and layer2)
+        // 3. Assert that exactly 3 fields were extracted (from kernel and
+        //    layer2)
         assert_eq!(fields.len(), 3);
     }
 
@@ -467,8 +471,8 @@ mod tests {
         // 2. Invoke the public API
         inject_pes_keys(&mut policy).expect("failed to inject keys");
 
-        // 3. Assert that the policy was not modified at all (matches the initial state
-        //    exactly)
+        // 3. Assert that the policy was not modified at all (matches the
+        //    initial state exactly)
         assert_eq!(policy, initial_policy);
     }
 }

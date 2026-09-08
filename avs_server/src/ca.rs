@@ -312,9 +312,9 @@ impl CertificateAuthority {
                 anyhow::bail!("Failed to create BIGNUM for exponent.");
             }
             // `65537` is he Fermat number F4 = 65537 = 2^16 + 1.
-            // There is bssl_sys::RSA_F4 constant but we need to conversion to use it.
-            // as the function expectes u64 and the constant is i32 (we need to handle the
-            // error).
+            // There is bssl_sys::RSA_F4 constant but we need to conversion to
+            // use it. as the function expectes u64 and the constant
+            // is i32 (we need to handle the error).
             if bssl_sys::BN_set_word(big_e, /* w= */ 65537) != 1 {
                 bssl_sys::BN_free(big_e);
                 bssl_sys::RSA_free(rsa);
@@ -339,7 +339,8 @@ impl CertificateAuthority {
                 anyhow::bail!("Failed to create PKey for Certificate Authority.");
             }
 
-            // `EVP_PKEY_assign_RSA()` takes ownership of `rsa` so we don't need to free it.
+            // `EVP_PKEY_assign_RSA()` takes ownership of `rsa` so we don't need
+            // to free it.
             if bssl_sys::EVP_PKEY_assign_RSA(ca_key_ptr, rsa) != 1 {
                 bssl_sys::EVP_PKEY_free(ca_key_ptr);
                 anyhow::bail!("Failed to assign RSA to PKey.");
@@ -576,9 +577,9 @@ impl CertificateAuthority {
     fn set_x509_subject_key_identifier(x509: *mut bssl_sys::X509) -> anyhow::Result<()> {
         let mut ctx = std::mem::MaybeUninit::<bssl_sys::X509V3_CTX>::uninit();
         unsafe {
-            // For self-signed root certificates, issuer and subject are identical.
-            // Setting subject is required to compute the SHA-1 hash of
-            // SubjectPublicKeyInfo.
+            // For self-signed root certificates, issuer and subject are
+            // identical. Setting subject is required to compute the
+            // SHA-1 hash of SubjectPublicKeyInfo.
             bssl_sys::X509V3_set_ctx(
                 ctx.as_mut_ptr(),
                 x509,                 // issuer
@@ -610,9 +611,9 @@ impl CertificateAuthority {
         Ok(())
     }
 
-    // Adds an Authority Key Identifier (AKI) extension (OID 2.5.29.35) to a leaf
-    // certificate by extracting the Subject Key Identifier (SKI) from the
-    // issuing CA certificate. See RFC 5280 Section 4.2.1.1:
+    // Adds an Authority Key Identifier (AKI) extension (OID 2.5.29.35) to a
+    // leaf certificate by extracting the Subject Key Identifier (SKI) from
+    // the issuing CA certificate. See RFC 5280 Section 4.2.1.1:
     // https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.1
     fn set_x509_authority_key_identifier(
         x509: *mut bssl_sys::X509,
@@ -628,8 +629,8 @@ impl CertificateAuthority {
 
         let mut ctx = std::mem::MaybeUninit::<bssl_sys::X509V3_CTX>::uninit();
         unsafe {
-            // Initialize X509V3_CTX linking the issuing CA cert (issuer) and leaf cert
-            // (subject).
+            // Initialize X509V3_CTX linking the issuing CA cert (issuer) and
+            // leaf cert (subject).
             bssl_sys::X509V3_set_ctx(
                 ctx.as_mut_ptr(),
                 issuer_x509,          // issuer: active signing CA certificate
@@ -822,7 +823,8 @@ impl CertificateAuthority {
                 bssl_sys::ASN1_IA5STRING_free(ia5);
                 anyhow::bail!("Failed to allocate GENERAL_NAME for SAN extension");
             }
-            // GENERAL_NAME_set0_value transfers ownership of `ia5` to `general_name`.
+            // GENERAL_NAME_set0_value transfers ownership of `ia5` to
+            // `general_name`.
             bssl_sys::GENERAL_NAME_set0_value(
                 general_name,
                 gen_type,
@@ -844,9 +846,11 @@ impl CertificateAuthority {
             }
             // `gens` now owns `general_name` (and nested `ia5`).
 
-            // 5. Serialize GENERAL_NAMES into X509_EXTENSION via DER encoding (i2d).
-            // Per RFC 5280 Section 4.2.1.6, if the certificate subject name is empty,
-            // the subjectAltName extension MUST be marked as critical.
+            // 5. Serialize GENERAL_NAMES into X509_EXTENSION via DER encoding
+            //    (i2d).
+            // Per RFC 5280 Section 4.2.1.6, if the certificate subject name is
+            // empty, the subjectAltName extension MUST be marked as
+            // critical.
             let ext = bssl_sys::X509V3_EXT_i2d(
                 bssl_sys::NID_subject_alt_name,
                 /* crit= */ 1,
@@ -945,8 +949,8 @@ impl CertificateAuthority {
             }
 
             // Serial number is a non-negative number that is 160-bit or less.
-            // We ask for 152-bit random number to avoid interpreting the number as
-            // negative.
+            // We ask for 152-bit random number to avoid interpreting the number
+            // as negative.
             if bssl_sys::BN_rand(
                 big_num,
                 152,
@@ -1043,8 +1047,8 @@ unsafe impl Sync for KeyPair {}
 
 impl PartialEq for KeyPair {
     fn eq(&self, other: &Self) -> bool {
-        // EVP_PKEY_cmp returns 1 if the keys are equal, 0 if not, and a negative value
-        // on error.
+        // EVP_PKEY_cmp returns 1 if the keys are equal, 0 if not, and a
+        // negative value on error.
         unsafe { bssl_sys::EVP_PKEY_cmp(self.key_pair, other.key_pair) == 1 }
     }
 }

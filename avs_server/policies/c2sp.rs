@@ -203,7 +203,8 @@ mod tests {
             KernelLayerReferenceValues, ReferenceValues, RootLayerReferenceValues,
         };
 
-        // 1. Construct a Policy where all 6 possible C2SP locations are populated
+        // 1. Construct a Policy where all 6 possible C2SP locations are
+        //    populated
         let mut policy = Policy {
             oak_reference_values: Some(ReferenceValues {
                 r#type: Some(reference_values::Type::Cbt(CbTransparentReferenceValues {
@@ -241,8 +242,8 @@ mod tests {
         // 2. Invoke get_c2sp_fields
         let fields = get_c2sp_fields(&mut policy);
 
-        // 3. Assert all 8 fields across the 4 layers were extracted: 1 (stage0) + 2
-        //    (kernel, init_ram_fs) + 2 (runtime_agent_binary, userspace)
+        // 3. Assert all 8 fields across the 4 layers were extracted: 1 (stage0)
+        //    + 2 (kernel, init_ram_fs) + 2 (runtime_agent_binary, userspace)
         //    + 1 (binary_mpm) + 2 (binary_mpms) = 8
         assert_eq!(fields.len(), 8);
     }
@@ -255,7 +256,8 @@ mod tests {
             KernelLayerReferenceValues, ReferenceValues,
         };
 
-        // 1. Construct a Policy where only some layers and fields are populated:
+        // 1. Construct a Policy where only some layers and fields are
+        //    populated:
         //    - root_layer is None
         //    - kernel_layer: kernel is Some, init_ram_fs is None
         //    - layer1 is None
@@ -316,7 +318,8 @@ mod tests {
         // 2. Invoke the public API
         inject_c2sp_policy(&mut policy, TEST_C2SP_POLICY).expect("failed to inject c2sp policy");
 
-        // 3. Construct the expected Policy object (with the c2sp policy injected)
+        // 3. Construct the expected Policy object (with the c2sp policy
+        //    injected)
         let expected_policy = Policy {
             oak_reference_values: Some(ReferenceValues {
                 r#type: Some(reference_values::Type::Cbt(CbTransparentReferenceValues {

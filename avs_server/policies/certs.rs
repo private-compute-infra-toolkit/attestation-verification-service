@@ -184,8 +184,8 @@ qrrlbUI=
         std::fs::write(temp_path.join("note1.txt"), "NOTE 1").unwrap();
         std::fs::write(subdir_path.join("note2.txt"), "NOTE 2").unwrap();
 
-        // Load certificates using a glob pattern matching all .pem files under the temp
-        // directory
+        // Load certificates using a glob pattern matching all .pem files under
+        // the temp directory
         let glob_pattern = format!("{}/**/*.pem", temp_path.to_string_lossy());
         let mut certs = load_certificates(&glob_pattern).unwrap();
         certs.sort(); // Sort to ensure deterministic order
