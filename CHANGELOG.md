@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 0.16.0 (2026-09-15)
+
+
+### Dependencies
+
+* **deps:** Update policies (diff hash: 5fc3e54d)
+* **deps:** update the EZ policy from head
+
 ## 0.15.0 (2026-09-08)
 
 
