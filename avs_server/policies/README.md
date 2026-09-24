@@ -12,8 +12,7 @@ server binary.
 
 ## Policies
 
-| Directory                | PolicyHint(s)                                                  |
-| ------------------------ | -------------------------------------------------------------- |
-| `private_aratea_server/` | `PRIVATE_ARATEA_FRONTEND_CB_CERTIFICATE`                       |
-| `encrypted_zone/`        | `EZ_ENFORCER_CB_CERTIFICATE`, `EZ_TSM_CB_FRONTEND_CERTIFICATE` |
-| `prober/`                | `PROBER_CB_CERTIFICATE`                                        |
+| Directory         | PolicyHint(s)                                                  |
+| ----------------- | -------------------------------------------------------------- |
+| `encrypted_zone/` | `EZ_ENFORCER_CB_CERTIFICATE`, `EZ_TSM_CB_FRONTEND_CERTIFICATE` |
+| `prober/`         | `PROBER_CB_CERTIFICATE`                                        |

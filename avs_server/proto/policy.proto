@@ -45,7 +45,7 @@ message Policy {
   OperatorPolicy operator_policy = 5;
 
   // Unique name identifying this policy within AVS (e.g.,
-  // "private_aratea_server", "encrypted_zone", "prober", "development").
+  // "encrypted_zone", "prober", "development").
   string name = 6;
 }
 

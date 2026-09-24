@@ -31,7 +31,6 @@ rust_binary(
 policy_bundle(
     name = "policy_bundle",
     policies = [
-        "//avs_server/policies/private_aratea_server:policy_binarypb",
         "//avs_server/policies/encrypted_zone:policy_binarypb",
         "//avs_server/policies/prober:policy_binarypb",
         "//avs_server/policies/development:policy_binarypb",

@@ -35,9 +35,6 @@ fn resolve_legacy_hint(hint: PolicyHint) -> anyhow::Result<(&'static str, Certif
         PolicyHint::Unspecified => {
             anyhow::bail!("cannot resolve policy name for POLICY_HINT_UNSPECIFIED")
         }
-        PolicyHint::PrivateArateaFrontendCbCertificate => {
-            Ok(("private_aratea_server", CertificateProfile::Unrestricted))
-        }
         PolicyHint::EzEnforcerCbCertificate => Ok(("encrypted_zone", CertificateProfile::Mtls)),
         PolicyHint::EzTsmCbFrontendCertificate => Ok(("encrypted_zone", CertificateProfile::Tls)),
         PolicyHint::ProberCbCertificate => Ok(("prober", CertificateProfile::Unrestricted)),
@@ -374,10 +371,6 @@ mod tests {
 
     #[test]
     fn test_resolve_legacy_hint() {
-        assert_eq!(
-            resolve_legacy_hint(PolicyHint::PrivateArateaFrontendCbCertificate).unwrap(),
-            ("private_aratea_server", CertificateProfile::Unrestricted)
-        );
         assert_eq!(
             resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate).unwrap(),
             ("encrypted_zone", CertificateProfile::Mtls)

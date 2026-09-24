@@ -57,8 +57,8 @@ message OperatorInfo {
 // Each policy hint entry is associated with a different role. Roles are placed
 // in the SAN extension of the resulting certificate.
 enum PolicyHint {
+  reserved 1;
   POLICY_HINT_UNSPECIFIED = 0;
-  PRIVATE_ARATEA_FRONTEND_CB_CERTIFICATE = 1;
   EZ_ENFORCER_CB_CERTIFICATE = 2;
   EZ_TSM_CB_FRONTEND_CERTIFICATE = 3;
   PROBER_CB_CERTIFICATE = 4;

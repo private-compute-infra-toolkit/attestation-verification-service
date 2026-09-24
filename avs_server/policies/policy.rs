@@ -96,18 +96,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_policy_private_aratea_returns_valid_policy() {
-        let policy = get_policy("private_aratea_server").expect("failed to get policy");
-        assert_eq!(policy.name, "private_aratea_server");
-        assert_eq!(policy.workload_name, "private-aratea-server");
-        let op = policy.operator_policy.expect("missing operator_policy");
-        assert_eq!(op.rules.len(), 1);
-        assert_eq!(op.rules[0].domain, "prod.google.com");
-        assert_eq!(op.rules[0].role, "pa-frontend");
-        assert!(policy.oak_reference_values.is_some());
-    }
-
-    #[test]
     fn get_policy_encrypted_zone_returns_valid_policy() {
         let policy = get_policy("encrypted_zone").expect("failed to get policy");
         assert_eq!(policy.name, "encrypted_zone");
