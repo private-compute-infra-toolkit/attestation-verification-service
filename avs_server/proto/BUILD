@@ -26,6 +26,7 @@ proto_library(
     deps = [
         "@oak//proto/attestation:endorsement_proto",
         "@oak//proto/attestation:evidence_proto",
+        "@oak//proto/attestation:verification_proto",
     ],
 )
 

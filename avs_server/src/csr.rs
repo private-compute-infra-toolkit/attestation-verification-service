@@ -29,6 +29,7 @@ use oak_proto_rust::oak::attestation::v1::{
     attestation_results::Status, AmdSevReferenceValues, AttestationResults, BinaryReferenceValue,
     CbLayer1TransparentReferenceValues, CbLayer2TransparentReferenceValues,
     CbTransparentReferenceValues, Endorsements, Evidence, KernelLayerReferenceValues,
+    TLogVerificationResults,
 };
 use oak_time_std::clock::SystemTimeClock;
 
@@ -139,6 +140,16 @@ fn extract_validity_with_fallback(
     Ok((not_before_sec, not_after_sec))
 }
 
+fn collect_tlog_verification_results(
+    attestation_results: AttestationResults,
+) -> Vec<TLogVerificationResults> {
+    attestation_results
+        .event_attestation_results
+        .into_iter()
+        .flat_map(|event_result| event_result.tlog_verifications)
+        .collect()
+}
+
 /// Validate CSR request using policy-based reference values and return the
 /// provisioned identity.
 ///
@@ -146,6 +157,8 @@ fn extract_validity_with_fallback(
 /// the policy's `oak_reference_values` field, constructs a verifier, and
 /// verifies the evidence against those reference values. The returned
 /// `ProvisionedIdentity` is populated from the policy's identity fields.
+///
+/// Also returns the t-log verification results reported by Oak.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_csr_request(
     csr_der: &[u8],
@@ -156,7 +169,7 @@ pub(crate) fn validate_csr_request(
     certificate_profile: CertificateProfile,
     operator_info: &OperatorInfo,
     policies_config: &policies::PoliciesConfig,
-) -> anyhow::Result<ProvisionedIdentity> {
+) -> anyhow::Result<(ProvisionedIdentity, Vec<TLogVerificationResults>)> {
     use anyhow::Context;
     use oak_proto_rust::oak::attestation::v1::reference_values;
 
@@ -208,7 +221,9 @@ pub(crate) fn validate_csr_request(
     let (not_before_sec, not_after_sec) =
         extract_validity_with_fallback(&attestation_results, current_time_sec, FALLBACK_VALIDITY)?;
 
-    Ok(ProvisionedIdentity {
+    let tlog_verification_results = collect_tlog_verification_results(attestation_results);
+
+    let identity = ProvisionedIdentity {
         public_key: csr_public_key,
         certificate_profile,
         operator_domain: operator_info.domain().to_string(),
@@ -218,7 +233,8 @@ pub(crate) fn validate_csr_request(
         workload_name: policy.workload_name,
         not_before_sec,
         not_after_sec,
-    })
+    };
+    Ok((identity, tlog_verification_results))
 }
 
 // Parses length-prefixed user data and returns
@@ -458,5 +474,32 @@ mod tests {
         let now = 1_000_000;
         let fallback = Duration::from_secs(5_000_000);
         assert!(extract_validity_with_fallback(&attestation_results, now, fallback).is_err());
+    }
+
+    #[test]
+    fn collect_tlog_verification_results_flattens_events() {
+        let record = |subject: &str| TLogVerificationResults {
+            subject: subject.to_string(),
+            ..Default::default()
+        };
+        let attestation_results = AttestationResults {
+            event_attestation_results: vec![
+                EventAttestationResults {
+                    tlog_verifications: vec![record("stage0"), record("kernel")],
+                    ..Default::default()
+                },
+                EventAttestationResults::default(),
+                EventAttestationResults {
+                    tlog_verifications: vec![record("container")],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            collect_tlog_verification_results(attestation_results),
+            vec![record("stage0"), record("kernel"), record("container")]
+        );
     }
 }

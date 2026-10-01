@@ -20,6 +20,7 @@ package attestation_verification;
 
 import "proto/attestation/endorsement.proto";
 import "proto/attestation/evidence.proto";
+import "proto/attestation/verification.proto";
 
 // Attestation Verification Service (AVS) acts as an intermediate certificate
 // authority for workloads. A workload may present its attestation in exchange
@@ -144,6 +145,10 @@ message CertifyAttestationResponse {
   // |  [2]  | TCA Self-Signed Cert    | TCA Root CA     | TCA Root CA (Self)   |
   // +-------+-------------------------+-----------------+----------------------+
   repeated bytes certificate_chain = 1;
+
+  // T-log verification results for the endorsements appraised during
+  // certification. For observability only.
+  repeated oak.attestation.v1.TLogVerificationResults tlog_verification_results = 2;
 }
 
 message CertifyAttestationStreamRequest {

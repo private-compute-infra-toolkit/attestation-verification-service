@@ -145,7 +145,7 @@ impl AttestationVerification for AttestationVerificationService {
 
         let (policy_name, certificate_profile) = resolve_policy_request(req.selector)?;
 
-        let identity = csr::validate_csr_request(
+        let (identity, tlog_verification_results) = csr::validate_csr_request(
             req.csr.as_slice(),
             evidence,
             endorsements,
@@ -161,7 +161,7 @@ impl AttestationVerification for AttestationVerificationService {
         })?;
         let mut certificate_chain = vec![cert];
         certificate_chain.extend_from_slice(certificate_authority.get_ca_cert_chain_der());
-        let reply = CertifyAttestationResponse { certificate_chain };
+        let reply = CertifyAttestationResponse { certificate_chain, tlog_verification_results };
 
         Ok(Response::new(reply))
     }
@@ -296,28 +296,33 @@ impl AttestationVerification for AttestationVerificationService {
                 &operator_info,
                 &policies_config,
             ) {
-                Ok(identity) => match certificate_authority.generate_certificate(&identity) {
-                    Ok(cert) => {
-                        let mut certificate_chain = vec![cert];
-                        certificate_chain
-                            .extend_from_slice(certificate_authority.get_ca_cert_chain_der());
-                        let reply = CertifyAttestationStreamResponse {
-                            response: Some(
-                                certify_attestation_stream_response::Response::CertifyResponse(
-                                    CertifyAttestationResponse { certificate_chain },
+                Ok((identity, tlog_verification_results)) => {
+                    match certificate_authority.generate_certificate(&identity) {
+                        Ok(cert) => {
+                            let mut certificate_chain = vec![cert];
+                            certificate_chain
+                                .extend_from_slice(certificate_authority.get_ca_cert_chain_der());
+                            let reply = CertifyAttestationStreamResponse {
+                                response: Some(
+                                    certify_attestation_stream_response::Response::CertifyResponse(
+                                        CertifyAttestationResponse {
+                                            certificate_chain,
+                                            tlog_verification_results,
+                                        },
+                                    ),
                                 ),
-                            ),
-                        };
-                        let _ = tx.send(Ok(reply)).await;
+                            };
+                            let _ = tx.send(Ok(reply)).await;
+                        }
+                        Err(e) => {
+                            let _ = tx
+                                .send(Err(Status::internal(format!(
+                                    "Failed to generate certificate: {e:?}"
+                                ))))
+                                .await;
+                        }
                     }
-                    Err(e) => {
-                        let _ = tx
-                            .send(Err(Status::internal(format!(
-                                "Failed to generate certificate: {e:?}"
-                            ))))
-                            .await;
-                    }
-                },
+                }
                 Err(e) => {
                     let _ = tx
                         .send(Err(Status::failed_precondition(format!("Validation failed: {e:?}"))))
