@@ -25,7 +25,6 @@ pub(crate) const PROD_VERIFIER_POLICY: &str = include_str!("prod-verifier.policy
 
 /// Helper to extract a mutable reference to the `c2sp` field from an optional
 /// `BinaryReferenceValue`.
-#[allow(dead_code)]
 fn get_c2sp_from_binary_reference_value(
     binary: &mut Option<BinaryReferenceValue>,
 ) -> Option<&mut C2sptLogProofReferenceValue> {
@@ -38,7 +37,6 @@ fn get_c2sp_from_binary_reference_value(
 
 /// Helper to extract a mutable reference to the `c2sp` field from an optional
 /// `KernelBinaryReferenceValue`.
-#[allow(dead_code)]
 fn get_c2sp_from_kernel_binary_reference_value(
     kernel: &mut Option<KernelBinaryReferenceValue>,
 ) -> Option<&mut C2sptLogProofReferenceValue> {
@@ -52,7 +50,6 @@ fn get_c2sp_from_kernel_binary_reference_value(
 
 /// Helper to extract a mutable reference to the `c2sp` field from a
 /// `MpmReferenceValue`.
-#[allow(dead_code)]
 fn get_c2sp_from_single_mpm_reference_value(
     mpm: &mut MpmReferenceValue,
 ) -> Option<&mut C2sptLogProofReferenceValue> {
@@ -64,7 +61,6 @@ fn get_c2sp_from_single_mpm_reference_value(
 
 /// Helper to extract a mutable reference to the `c2sp` field from an optional
 /// `MpmReferenceValue`.
-#[allow(dead_code)]
 fn get_c2sp_from_mpm_reference_value(
     mpm: &mut Option<MpmReferenceValue>,
 ) -> Option<&mut C2sptLogProofReferenceValue> {
@@ -73,7 +69,7 @@ fn get_c2sp_from_mpm_reference_value(
 
 /// Returns a list of mutable references to all present `c2sp` fields in the
 /// given `Policy`.
-#[allow(dead_code, deprecated)]
+#[allow(deprecated)]
 fn get_c2sp_fields(policy: &mut Policy) -> Vec<&mut C2sptLogProofReferenceValue> {
     use oak_proto_rust::oak::attestation::v1::reference_values;
 
@@ -121,7 +117,6 @@ fn get_c2sp_fields(policy: &mut Policy) -> Vec<&mut C2sptLogProofReferenceValue>
 }
 
 /// Injects `c2sp_policy` into all `c2sp` fields in the policy.
-#[allow(dead_code)]
 pub fn inject_c2sp_policy(policy: &mut Policy, c2sp_policy: &str) -> anyhow::Result<()> {
     for c2sp_field in get_c2sp_fields(policy) {
         c2sp_field.policy = c2sp_policy.to_string();

@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 1.2.0 (2026-10-16)
+
+
+### Dependencies
+
+* **deps:** Update policies (diff hash: c2eceb9e)
+* **deps:** Update tlog policies (diff hash: 439703ee)
+* **deps:** Update tlog policies (diff hash: 5ee9f0dc)
+* **deps:** Update tlog policies (diff hash: bbad259a)
+
+
+### Features
+
+* add dev-pa-014c68966d to dev policy
+* add dev-pa-2481dfc23b to dev policy
+* add dev-pa-eba5b05bf8 to dev policy
+* add pa-45468cbcc9 production attestation policy
+* add pa-45468cbcc9 staging attestation policy
+* add prober_ez policy for EZified AVS prober
+
 ## 1.1.0 (2026-10-01)
 
 

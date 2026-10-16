@@ -33,7 +33,9 @@ policy_bundle(
     policies = [
         "//avs_server/policies/encrypted_zone:policy_binarypb",
         "//avs_server/policies/prober:policy_binarypb",
+        "//avs_server/policies/prober_ez:policy_binarypb",
         "//avs_server/policies/development:policy_binarypb",
+        "//avs_server/policies/pa-45468cbcc9:policy_binarypb",
     ],
 )
 

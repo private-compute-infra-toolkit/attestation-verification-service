@@ -67,7 +67,6 @@ pub fn get_policy_with_config(name: &str, config: &PoliciesConfig) -> anyhow::Re
 /// Returns the `Policy` associated with the given policy name and
 /// configuration options, injecting `c2sp_policy` into every C2SP tlog
 /// reference value it contains.
-#[cfg_attr(not(feature = "enable_tessera"), allow(unused_variables))]
 pub fn get_policy_with_config_and_c2sp_policy(
     name: &str,
     config: &PoliciesConfig,
@@ -83,7 +82,6 @@ pub fn get_policy_with_config_and_c2sp_policy(
         .ok_or_else(|| anyhow::anyhow!("unrecognized policy name: {}", name))?;
 
     pes::inject_pes_keys(&mut policy)?;
-    #[cfg(feature = "enable_tessera")]
     if config.enable_c2sp_tlog {
         c2sp::inject_c2sp_policy(&mut policy, c2sp_policy)?;
     }
@@ -120,6 +118,30 @@ mod tests {
     }
 
     #[test]
+    fn get_policy_prober_ez_returns_valid_policy() {
+        let policy = get_policy("prober_ez").expect("failed to get policy");
+        assert_eq!(policy.name, "prober_ez");
+        assert_eq!(policy.workload_name, "attestation-verification-service-prober-ez");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "prober");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_45468cbcc9_returns_valid_policy() {
+        let policy = get_policy("pa-45468cbcc9").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-45468cbcc9");
+        assert_eq!(policy.workload_name, "pa-45468cbcc9");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-45468cbcc9");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
     fn get_policy_development_returns_error() {
         let result = get_policy_with_config(
             "development",
@@ -139,9 +161,15 @@ mod tests {
         assert_eq!(policy.name, "development");
         assert_eq!(policy.workload_name, "unendorsed-development");
         let op = policy.operator_policy.expect("missing operator_policy");
-        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules.len(), 4);
         assert_eq!(op.rules[0].domain, "prod.google.com");
         assert_eq!(op.rules[0].role, "dev");
+        assert_eq!(op.rules[1].domain, "prod.google.com");
+        assert_eq!(op.rules[1].role, "dev-pa-2481dfc23b");
+        assert_eq!(op.rules[2].domain, "prod.google.com");
+        assert_eq!(op.rules[2].role, "dev-pa-eba5b05bf8");
+        assert_eq!(op.rules[3].domain, "prod.google.com");
+        assert_eq!(op.rules[3].role, "dev-pa-014c68966d");
         assert!(policy.oak_reference_values.is_some());
     }
 

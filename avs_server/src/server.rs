@@ -30,12 +30,19 @@ use tonic::{Request, Response, Status};
 
 /// Maps a legacy `PolicyHint` to its corresponding policy name and certificate
 /// profile.
-fn resolve_legacy_hint(hint: PolicyHint) -> anyhow::Result<(&'static str, CertificateProfile)> {
+fn resolve_legacy_hint(
+    hint: PolicyHint,
+    operator_role: &str,
+) -> anyhow::Result<(&'static str, CertificateProfile)> {
     match hint {
         PolicyHint::Unspecified => {
             anyhow::bail!("cannot resolve policy name for POLICY_HINT_UNSPECIFIED")
         }
-        PolicyHint::EzEnforcerCbCertificate => Ok(("encrypted_zone", CertificateProfile::Mtls)),
+        // TODO: Migrate AvsCtivmSdk to CertificationParameters.
+        PolicyHint::EzEnforcerCbCertificate => match operator_role {
+            "prober" | "prober-staging" => Ok(("prober_ez", CertificateProfile::Mtls)),
+            _ => Ok(("encrypted_zone", CertificateProfile::Mtls)),
+        },
         PolicyHint::EzTsmCbFrontendCertificate => Ok(("encrypted_zone", CertificateProfile::Tls)),
         PolicyHint::ProberCbCertificate => Ok(("prober", CertificateProfile::Unrestricted)),
         PolicyHint::DevelopmentCbCertificate => {
@@ -56,6 +63,7 @@ fn resolve_legacy_hint(hint: PolicyHint) -> anyhow::Result<(&'static str, Certif
 #[allow(deprecated)]
 fn resolve_policy_request(
     selector: Option<certify_attestation_request::Selector>,
+    operator_role: &str,
 ) -> Result<(String, CertificateProfile), Status> {
     match selector {
         None => Err(Status::invalid_argument(
@@ -77,7 +85,7 @@ fn resolve_policy_request(
         }
         Some(certify_attestation_request::Selector::PolicyHint(hint)) => {
             let hint = PolicyHint::try_from(hint).unwrap_or(PolicyHint::Unspecified);
-            let (name, profile) = resolve_legacy_hint(hint)
+            let (name, profile) = resolve_legacy_hint(hint, operator_role)
                 .map_err(|e| Status::invalid_argument(format!("{e:?}")))?;
             Ok((name.to_string(), profile))
         }
@@ -143,7 +151,8 @@ impl AttestationVerification for AttestationVerificationService {
 
         let operator_info = OperatorInfo::try_from(operator_info_proto)?;
 
-        let (policy_name, certificate_profile) = resolve_policy_request(req.selector)?;
+        let (policy_name, certificate_profile) =
+            resolve_policy_request(req.selector, operator_info.role())?;
 
         let (identity, tlog_verification_results) = csr::validate_csr_request(
             req.csr.as_slice(),
@@ -278,7 +287,7 @@ impl AttestationVerification for AttestationVerificationService {
             };
 
             let (policy_name, certificate_profile) =
-                match resolve_policy_request(certify_request.selector) {
+                match resolve_policy_request(certify_request.selector, operator_info.role()) {
                     Ok(res) => res,
                     Err(e) => {
                         let _ = tx.send(Err(e)).await;
@@ -377,29 +386,42 @@ mod tests {
     #[test]
     fn test_resolve_legacy_hint() {
         assert_eq!(
-            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate).unwrap(),
+            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "pa-frontend").unwrap(),
             ("encrypted_zone", CertificateProfile::Mtls)
         );
         assert_eq!(
-            resolve_legacy_hint(PolicyHint::EzTsmCbFrontendCertificate).unwrap(),
+            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "pa-frontend-staging")
+                .unwrap(),
+            ("encrypted_zone", CertificateProfile::Mtls)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "prober").unwrap(),
+            ("prober_ez", CertificateProfile::Mtls)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "prober-staging").unwrap(),
+            ("prober_ez", CertificateProfile::Mtls)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzTsmCbFrontendCertificate, "pa-frontend").unwrap(),
             ("encrypted_zone", CertificateProfile::Tls)
         );
         assert_eq!(
-            resolve_legacy_hint(PolicyHint::ProberCbCertificate).unwrap(),
+            resolve_legacy_hint(PolicyHint::ProberCbCertificate, "prober").unwrap(),
             ("prober", CertificateProfile::Unrestricted)
         );
         assert_eq!(
-            resolve_legacy_hint(PolicyHint::DevelopmentCbCertificate).unwrap(),
+            resolve_legacy_hint(PolicyHint::DevelopmentCbCertificate, "dev").unwrap(),
             ("development", CertificateProfile::Unrestricted)
         );
         assert_eq!(
-            resolve_legacy_hint(PolicyHint::DevelopmentMtlsCbCertificate).unwrap(),
+            resolve_legacy_hint(PolicyHint::DevelopmentMtlsCbCertificate, "dev").unwrap(),
             ("development", CertificateProfile::Mtls)
         );
         assert_eq!(
-            resolve_legacy_hint(PolicyHint::DevelopmentTlsCbCertificate).unwrap(),
+            resolve_legacy_hint(PolicyHint::DevelopmentTlsCbCertificate, "dev").unwrap(),
             ("development", CertificateProfile::Tls)
         );
-        assert!(resolve_legacy_hint(PolicyHint::Unspecified).is_err());
+        assert!(resolve_legacy_hint(PolicyHint::Unspecified, "dev").is_err());
     }
 }

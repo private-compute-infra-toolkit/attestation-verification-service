@@ -14,5 +14,7 @@ server binary.
 
 | Directory         | PolicyHint(s)                                                  |
 | ----------------- | -------------------------------------------------------------- |
+| `pa-45468cbcc9/`  | `pa-45468cbcc9`                                                |
 | `encrypted_zone/` | `EZ_ENFORCER_CB_CERTIFICATE`, `EZ_TSM_CB_FRONTEND_CERTIFICATE` |
 | `prober/`         | `PROBER_CB_CERTIFICATE`                                        |
+| `prober_ez/`      | `EZ_ENFORCER_CB_CERTIFICATE`                                   |
