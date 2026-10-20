@@ -38,7 +38,7 @@ fn resolve_legacy_hint(
         PolicyHint::Unspecified => {
             anyhow::bail!("cannot resolve policy name for POLICY_HINT_UNSPECIFIED")
         }
-        // TODO: Migrate AvsCtivmSdk to CertificationParameters.
+        // TODO(b/552848900): Migrate AvsCtivmSdk to CertificationParameters.
         PolicyHint::EzEnforcerCbCertificate => match operator_role {
             "prober" | "prober-staging" => Ok(("prober_ez", CertificateProfile::Mtls)),
             _ => Ok(("encrypted_zone", CertificateProfile::Mtls)),
