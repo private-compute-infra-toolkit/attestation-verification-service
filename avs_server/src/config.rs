@@ -25,7 +25,7 @@ fn default_tca_endpoint() -> String {
 }
 
 fn default_include_development_policy() -> bool {
-    false
+    true
 }
 
 fn default_enable_c2sp_tlog() -> bool {
@@ -65,17 +65,17 @@ mod tests {
         let config: AppConfig = serde_json::from_str(json_str).unwrap();
         assert!(!config.use_self_signed_cert);
         assert_eq!(config.tca_endpoint, "http://10.0.2.100:8008");
-        assert!(!config.include_development_policy);
+        assert!(config.include_development_policy);
         assert!(!config.enable_c2sp_tlog);
     }
 
     #[test]
     fn test_custom_values_applied() {
-        let json_str = r#"{"use_self_signed_cert": true, "tca_endpoint": "http://example.com", "include_development_policy": true, "enable_c2sp_tlog": true}"#;
+        let json_str = r#"{"use_self_signed_cert": true, "tca_endpoint": "http://example.com", "include_development_policy": false, "enable_c2sp_tlog": true}"#;
         let config: AppConfig = serde_json::from_str(json_str).unwrap();
         assert!(config.use_self_signed_cert);
         assert_eq!(config.tca_endpoint, "http://example.com");
-        assert!(config.include_development_policy);
+        assert!(!config.include_development_policy);
         assert!(config.enable_c2sp_tlog);
     }
 

@@ -103,7 +103,7 @@ repos:
         language: docker_image
         require_serial: true
         verbose: true
-        entry: rustlang/rust:nightly-slim bash -c 'rustup component add rustfmt 2> /dev/null && rustfmt --unstable-features "$@"' --
+        entry: rustlang/rust:nightly-slim@sha256:6e8a5fd82473a58ac766883a63dfdd368c6c7eae4007dda7836b8a33626e83f7 bash -c 'rustup component add rustfmt 2> /dev/null && rustfmt --unstable-features "$@"' --
         types: [rust]
 
       - id: buildifier

@@ -39,7 +39,7 @@ pub(crate) struct CertificateAuthority {
     trust_domain: String,
 }
 
-// TODO: encapsulate x509 with a rust struct
+// TODO(b/474580628): encapsulate x509 with a rust struct
 // and implement Drop train similar to what is done for `KeyPair`
 // to make cleanup logic easier.
 impl CertificateAuthority {
