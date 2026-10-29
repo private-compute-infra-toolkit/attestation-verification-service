@@ -41,6 +41,10 @@ operator_policy {
     domain: "prod.google.com"
     role: "dev-pa-014c68966d"
   }
+  rules {
+    domain: "prod.google.com"
+    role: "dev-pa-3b327f803b"
+  }
 }
 
 oak_reference_values {

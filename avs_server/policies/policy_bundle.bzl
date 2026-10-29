@@ -14,15 +14,22 @@
 
 """Bazel macros for AVS policy compilation and bundling."""
 
-def policy_binarypb(name, textproto = "policy.textproto", visibility = None, **kwargs):
+def policy_binarypb(name, textproto = "policy.textproto", out = None, visibility = None, **kwargs):
     """Compiles a Policy textproto into a binarypb file.
 
     Args:
         name: Target name (conventionally "policy_binarypb").
         textproto: The policy textproto source file.
+        out: The output binarypb file name. Defaults to replacing .textproto with .binarypb.
         visibility: Bazel visibility.
         **kwargs: Additional arguments passed to genrule.
     """
+    if not out:
+        if textproto.endswith(".textproto"):
+            out = textproto[:-len(".textproto")] + ".binarypb"
+        else:
+            out = name + ".binarypb"
+
     native.genrule(
         name = name,
         srcs = [
@@ -34,7 +41,7 @@ def policy_binarypb(name, textproto = "policy.textproto", visibility = None, **k
             "@com_google_protobuf//:well_known_type_protos",
             "@com_google_protobuf//:descriptor_proto_srcs",
         ],
-        outs = ["policy.binarypb"],
+        outs = [out],
         cmd = (
             "$(location @com_google_protobuf//:protoc) " +
             "--encode=attestation_verification.Policy " +

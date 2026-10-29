@@ -41,9 +41,13 @@ fn resolve_legacy_hint(
         // TODO(b/552848900): Migrate AvsCtivmSdk to CertificationParameters.
         PolicyHint::EzEnforcerCbCertificate => match operator_role {
             "prober" | "prober-staging" => Ok(("prober_ez", CertificateProfile::Mtls)),
+            "pa-frontend-nonprod" => Ok(("pa-frontend-nonprod", CertificateProfile::Mtls)),
             _ => Ok(("encrypted_zone", CertificateProfile::Mtls)),
         },
-        PolicyHint::EzTsmCbFrontendCertificate => Ok(("encrypted_zone", CertificateProfile::Tls)),
+        PolicyHint::EzTsmCbFrontendCertificate => match operator_role {
+            "pa-frontend-nonprod" => Ok(("pa-frontend-nonprod", CertificateProfile::Tls)),
+            _ => Ok(("encrypted_zone", CertificateProfile::Tls)),
+        },
         PolicyHint::ProberCbCertificate => Ok(("prober", CertificateProfile::Unrestricted)),
         PolicyHint::DevelopmentCbCertificate => {
             Ok(("development", CertificateProfile::Unrestricted))
@@ -395,6 +399,11 @@ mod tests {
             ("encrypted_zone", CertificateProfile::Mtls)
         );
         assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "pa-frontend-nonprod")
+                .unwrap(),
+            ("pa-frontend-nonprod", CertificateProfile::Mtls)
+        );
+        assert_eq!(
             resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "prober").unwrap(),
             ("prober_ez", CertificateProfile::Mtls)
         );
@@ -405,6 +414,11 @@ mod tests {
         assert_eq!(
             resolve_legacy_hint(PolicyHint::EzTsmCbFrontendCertificate, "pa-frontend").unwrap(),
             ("encrypted_zone", CertificateProfile::Tls)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzTsmCbFrontendCertificate, "pa-frontend-nonprod")
+                .unwrap(),
+            ("pa-frontend-nonprod", CertificateProfile::Tls)
         );
         assert_eq!(
             resolve_legacy_hint(PolicyHint::ProberCbCertificate, "prober").unwrap(),

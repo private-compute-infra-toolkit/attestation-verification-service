@@ -32,10 +32,20 @@ policy_bundle(
     name = "policy_bundle",
     policies = [
         "//avs_server/policies/encrypted_zone:policy_binarypb",
+        "//avs_server/policies/encrypted_zone:policy_nonprod_binarypb",
         "//avs_server/policies/prober:policy_binarypb",
         "//avs_server/policies/prober_ez:policy_binarypb",
         "//avs_server/policies/development:policy_binarypb",
+        "//avs_server/policies/pa-014c68966d:policy_binarypb",
+        "//avs_server/policies/pa-014c68966d:policy_nonprod_binarypb",
+        "//avs_server/policies/pa-2481dfc23b:policy_binarypb",
+        "//avs_server/policies/pa-2481dfc23b:policy_nonprod_binarypb",
         "//avs_server/policies/pa-45468cbcc9:policy_binarypb",
+        "//avs_server/policies/pa-45468cbcc9:policy_nonprod_binarypb",
+        "//avs_server/policies/pa-bfee2c4a65:policy_binarypb",
+        "//avs_server/policies/pa-bfee2c4a65:policy_nonprod_binarypb",
+        "//avs_server/policies/pa-eba5b05bf8:policy_binarypb",
+        "//avs_server/policies/pa-eba5b05bf8:policy_nonprod_binarypb",
     ],
 )
 

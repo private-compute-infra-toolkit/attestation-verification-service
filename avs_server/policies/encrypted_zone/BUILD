@@ -22,10 +22,23 @@ policy_binarypb(
     name = "policy_binarypb",
 )
 
+policy_binarypb(
+    name = "policy_nonprod_binarypb",
+    textproto = "policy-nonprod.textproto",
+)
+
 filegroup(
     name = "policy",
     srcs = [
         "policy.textproto",
         ":policy_binarypb",
+    ],
+)
+
+filegroup(
+    name = "policy_nonprod",
+    srcs = [
+        "policy-nonprod.textproto",
+        ":policy_nonprod_binarypb",
     ],
 )

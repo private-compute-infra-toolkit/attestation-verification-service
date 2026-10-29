@@ -20,7 +20,9 @@ use crate::{ca::KeyPair, operator_info::OperatorInfo};
 use anyhow::Context;
 use avs_proto_rust::avs::CertificateProfile;
 use oak_attestation_verification::{
-    results::{get_user_data_payload, get_validity},
+    create_amd_verifier, create_insecure_verifier, create_intel_tdx_verifier, extract_evidence,
+    results::{get_user_data_payload, get_validity, unique_signing_public_key},
+    verifier::verify_user_data_certificate,
     AmdSevSnpPolicy, AmdSevSnpTransparentDiceAttestationVerifier, FirmwarePolicy,
     TransparentLayer1Policy, TransparentLayer2Policy, TransparentStage0Policy,
 };
@@ -29,9 +31,10 @@ use oak_proto_rust::oak::attestation::v1::{
     attestation_results::Status, AmdSevReferenceValues, AttestationResults, BinaryReferenceValue,
     CbLayer1TransparentReferenceValues, CbLayer2TransparentReferenceValues,
     CbTransparentReferenceValues, Endorsements, Evidence, KernelLayerReferenceValues,
-    TLogVerificationResults,
+    ReferenceValues, TLogVerificationResults, TeePlatform,
 };
 use oak_time_std::clock::SystemTimeClock;
+use p256::ecdsa::VerifyingKey;
 
 // Three months (90 days) fallback validity.
 const FALLBACK_VALIDITY: Duration = Duration::from_secs(90 * 24 * 60 * 60);
@@ -106,6 +109,114 @@ fn create_cbt_verifier(
     ))
 }
 
+/// Decorator around an Oak Containers platform `AttestationVerifier` that also
+/// verifies `Evidence.signed_user_data_certificate` against the verified
+/// container instance signing public key.
+struct OakContainersAttestationVerifier {
+    inner: Box<dyn AttestationVerifier>,
+}
+
+impl OakContainersAttestationVerifier {
+    fn new(inner: Box<dyn AttestationVerifier>) -> Self {
+        Self { inner }
+    }
+}
+
+impl AttestationVerifier for OakContainersAttestationVerifier {
+    fn verify(
+        &self,
+        evidence: &Evidence,
+        endorsements: &Endorsements,
+    ) -> anyhow::Result<AttestationResults> {
+        let mut attestation_results = self.inner.verify(evidence, endorsements)?;
+        anyhow::ensure!(
+            attestation_results.status == i32::from(Status::Success),
+            "attestation verification failed with status {:?}: {}",
+            attestation_results.status,
+            attestation_results.reason
+        );
+        verify_oak_containers_user_data(evidence, &mut attestation_results)?;
+        Ok(attestation_results)
+    }
+}
+
+/// Constructs the appropriate `AttestationVerifier` for the policy's
+/// `ReferenceValues` (`Cbt` or `OakContainers`) and optional TEE platform.
+fn create_verifier(
+    oak_ref_values: &ReferenceValues,
+    tee_platform: Option<TeePlatform>,
+) -> anyhow::Result<Box<dyn AttestationVerifier>> {
+    use oak_proto_rust::oak::attestation::v1::reference_values;
+
+    match oak_ref_values.r#type.as_ref() {
+        Some(reference_values::Type::Cbt(cbt_ref_values)) => {
+            Ok(Box::new(create_cbt_verifier(cbt_ref_values)?))
+        }
+        Some(reference_values::Type::OakContainers(_)) => {
+            let platform = tee_platform.context("missing TEE platform for Oak Containers")?;
+            let platform_verifier: Box<dyn AttestationVerifier> = match platform {
+                TeePlatform::AmdSevSnp => {
+                    Box::new(create_amd_verifier(SystemTimeClock, oak_ref_values)?)
+                }
+                TeePlatform::IntelTdx => {
+                    Box::new(create_intel_tdx_verifier(SystemTimeClock, oak_ref_values)?)
+                }
+                TeePlatform::None => {
+                    Box::new(create_insecure_verifier(SystemTimeClock, oak_ref_values)?)
+                }
+                platform => {
+                    anyhow::bail!("unsupported TEE platform for Oak Containers: {:?}", platform);
+                }
+            };
+            Ok(Box::new(OakContainersAttestationVerifier::new(platform_verifier)))
+        }
+        _ => anyhow::bail!("policy oak_reference_values must be either Cbt or OakContainers"),
+    }
+}
+
+/// Verifies `Evidence.signed_user_data_certificate` against the verified
+/// Oak Containers instance signing public key (`unique_signing_public_key` from
+/// `ContainerLayerData` or `extract_evidence` from `application_keys`) and
+/// appends the resulting `EventAttestationResults` to `attestation_results`.
+fn verify_oak_containers_user_data(
+    evidence: &Evidence,
+    attestation_results: &mut AttestationResults,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !evidence.signed_user_data_certificate.is_empty(),
+        "missing signed_user_data_certificate in Oak Containers evidence"
+    );
+
+    // On both AMD SEV-SNP and Intel TDX, `ContainerPolicy::verify` extracts
+    // `ContainerLayerData.signing_public_key` into the event attestation
+    // results (`unique_signing_public_key`). Fall back to `extract_evidence`
+    // (`application_keys.signing_public_key_certificate`, verified by
+    // `verify_dice_chain`) for older SEV-SNP evidence where
+    // `ContainerLayerData.signing_public_key` was not populated.
+    let signing_public_key_bytes = match unique_signing_public_key(attestation_results) {
+        Ok(bytes) => bytes.clone(),
+        Err(_) => {
+            extract_evidence(evidence)
+                .context("extracting signing public key from Oak Containers evidence")?
+                .signing_public_key
+        }
+    };
+
+    let signing_verifying_key =
+        VerifyingKey::from_sec1_bytes(&signing_public_key_bytes).map_err(|err| {
+            anyhow::anyhow!("failed to parse Oak Containers signing public key: {err}")
+        })?;
+
+    let user_data_result = verify_user_data_certificate(
+        &evidence.signed_user_data_certificate,
+        &signing_verifying_key,
+    )
+    .context("verifying signed user data certificate for Oak Containers")?;
+    attestation_results.event_attestation_results.push(user_data_result);
+
+    Ok(())
+}
+
 /// Extracts the validity period by intersecting the endorsement validity
 /// windows returned across all event attestation results. If no endorsement
 /// validity windows are present, falls back to `fallback_duration`.
@@ -171,7 +282,6 @@ pub(crate) fn validate_csr_request(
     policies_config: &policies::PoliciesConfig,
 ) -> anyhow::Result<(ProvisionedIdentity, Vec<TLogVerificationResults>)> {
     use anyhow::Context;
-    use oak_proto_rust::oak::attestation::v1::reference_values;
 
     let csr_public_key = verify_csr_and_get_public_key(csr_der)?;
 
@@ -196,12 +306,8 @@ pub(crate) fn validate_csr_request(
 
     let oak_ref_values =
         policy.oak_reference_values.as_ref().context("policy is missing oak_reference_values")?;
-    let cbt_ref_values = match oak_ref_values.r#type.as_ref() {
-        Some(reference_values::Type::Cbt(cbt)) => cbt,
-        _ => anyhow::bail!("policy oak_reference_values is not the expected Cbt type"),
-    };
-
-    let verifier = create_cbt_verifier(cbt_ref_values)?;
+    let tee_platform = evidence.root_layer.as_ref().map(|r| r.platform());
+    let verifier = create_verifier(oak_ref_values, tee_platform)?;
     let attestation_results = verifier.verify(evidence, endorsements)?;
 
     if attestation_results.status != i32::from(Status::Success) {
@@ -501,5 +607,139 @@ mod tests {
             collect_tlog_verification_results(attestation_results),
             vec![record("stage0"), record("kernel"), record("container")]
         );
+    }
+
+    #[test]
+    fn verify_oak_containers_user_data_succeeds_and_extracts_payload() {
+        use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
+        use oak_attestation_verification::results::set_signing_public_key;
+        use p256::ecdsa::{signature::Signer, SigningKey};
+
+        let signing_key = SigningKey::from_bytes((&[0x42u8; 32]).into()).unwrap();
+        let verifying_key_sec1 = signing_key.verifying_key().to_sec1_bytes().to_vec();
+
+        let payload = b"bound-nonce-and-public-key-payload";
+        let protected = HeaderBuilder::new().algorithm(iana::Algorithm::ES256).build();
+        let cose_sign1 = CoseSign1Builder::new()
+            .protected(protected)
+            .payload(payload.to_vec())
+            .create_signature(&[], |data| {
+                let sig: p256::ecdsa::Signature = signing_key.sign(data);
+                sig.to_bytes().to_vec()
+            })
+            .build();
+
+        let evidence = Evidence {
+            signed_user_data_certificate: cose_sign1.to_vec().unwrap(),
+            ..Default::default()
+        };
+
+        let mut container_event_result = EventAttestationResults::default();
+        set_signing_public_key(&mut container_event_result, &verifying_key_sec1);
+        let mut attestation_results = AttestationResults {
+            status: Status::Success.into(),
+            event_attestation_results: vec![container_event_result],
+            ..Default::default()
+        };
+
+        verify_oak_containers_user_data(&evidence, &mut attestation_results)
+            .expect("user data verification should succeed");
+
+        let extracted = attestation_results
+            .event_attestation_results
+            .iter()
+            .find_map(get_user_data_payload)
+            .expect("user data payload artifact should be present");
+        assert_eq!(extracted.as_slice(), payload);
+    }
+
+    #[test]
+    fn verify_oak_containers_user_data_rejects_missing_or_wrong_signature() {
+        use coset::{iana, CborSerializable, CoseSign1Builder, HeaderBuilder};
+        use oak_attestation_verification::results::set_signing_public_key;
+        use p256::ecdsa::{signature::Signer, SigningKey};
+
+        let signing_key = SigningKey::from_bytes((&[0x42u8; 32]).into()).unwrap();
+        let wrong_key = SigningKey::from_bytes((&[0x99u8; 32]).into()).unwrap();
+        let verifying_key_sec1 = signing_key.verifying_key().to_sec1_bytes().to_vec();
+
+        let mut container_event_result = EventAttestationResults::default();
+        set_signing_public_key(&mut container_event_result, &verifying_key_sec1);
+        let mut attestation_results = AttestationResults {
+            status: Status::Success.into(),
+            event_attestation_results: vec![container_event_result],
+            ..Default::default()
+        };
+
+        // 1. Missing signed_user_data_certificate
+        let empty_evidence = Evidence::default();
+        assert!(verify_oak_containers_user_data(&empty_evidence, &mut attestation_results).is_err());
+
+        // 2. Signed with wrong key
+        let protected = HeaderBuilder::new().algorithm(iana::Algorithm::ES256).build();
+        let cose_sign1 = CoseSign1Builder::new()
+            .protected(protected)
+            .payload(b"payload".to_vec())
+            .create_signature(&[], |data| {
+                let sig: p256::ecdsa::Signature = wrong_key.sign(data);
+                sig.to_bytes().to_vec()
+            })
+            .build();
+        let bad_evidence = Evidence {
+            signed_user_data_certificate: cose_sign1.to_vec().unwrap(),
+            ..Default::default()
+        };
+        assert!(verify_oak_containers_user_data(&bad_evidence, &mut attestation_results).is_err());
+    }
+
+    struct StubAttestationVerifier {
+        results: AttestationResults,
+    }
+
+    impl AttestationVerifier for StubAttestationVerifier {
+        fn verify(&self, _: &Evidence, _: &Endorsements) -> anyhow::Result<AttestationResults> {
+            Ok(self.results.clone())
+        }
+    }
+
+    #[test]
+    fn oak_containers_attestation_verifier_propagates_inner_failure() {
+        let inner = StubAttestationVerifier {
+            results: AttestationResults {
+                status: Status::GenericFailure.into(),
+                reason: "simulated stage0 mismatch".to_string(),
+                ..Default::default()
+            },
+        };
+        let verifier = OakContainersAttestationVerifier::new(Box::new(inner));
+        let err = verifier
+            .verify(&Evidence::default(), &Endorsements::default())
+            .expect_err("should fail when inner verifier returns non-Success status");
+        assert!(err.to_string().contains("simulated stage0 mismatch"));
+    }
+
+    #[test]
+    fn create_verifier_oak_containers_checks_tee_platform() {
+        use oak_proto_rust::oak::attestation::v1::{
+            reference_values, ContainerLayerReferenceValues, InsecureReferenceValues,
+            OakContainersReferenceValues, RootLayerReferenceValues, SystemLayerReferenceValues,
+        };
+
+        let oak_ref_values = ReferenceValues {
+            r#type: Some(reference_values::Type::OakContainers(OakContainersReferenceValues {
+                root_layer: Some(RootLayerReferenceValues {
+                    insecure: Some(InsecureReferenceValues::default()),
+                    ..Default::default()
+                }),
+                kernel_layer: Some(KernelLayerReferenceValues::default()),
+                system_layer: Some(SystemLayerReferenceValues::default()),
+                container_layer: Some(ContainerLayerReferenceValues::default()),
+            })),
+        };
+
+        let err = create_verifier(&oak_ref_values, None).err().expect("missing tee_platform");
+        assert!(err.to_string().contains("missing TEE platform for Oak Containers"));
+        assert!(create_verifier(&oak_ref_values, Some(TeePlatform::Unspecified)).is_err());
+        assert!(create_verifier(&oak_ref_values, Some(TeePlatform::None)).is_ok());
     }
 }

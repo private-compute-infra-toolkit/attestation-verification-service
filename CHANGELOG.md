@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 1.4.0 (2026-10-29)
+
+
+### Dependencies
+
+* **deps:** Update policies (diff hash: 9b414aff)
+
+
+### Features
+
+* add dev-pa-3b327f803b role to development policy
+* Add Oak Containers CSR verification
+* add pa-014c68966d production/nonprod attestation policy
+* add pa-2481dfc23b production/nonprod attestation policy
+* add pa-45468cbcc9 nonprod attestation policy
+* add pa-bfee2c4a65 production/nonprod attestation policy
+* add pa-eba5b05bf8 production/nonprod attestation policy
+* add pa-frontend-nonprod attestation policy
+
 ## 1.3.0 (2026-10-21)
 
 

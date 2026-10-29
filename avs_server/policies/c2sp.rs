@@ -15,9 +15,9 @@
 use avs_proto_rust::avs::Policy;
 
 use oak_proto_rust::oak::attestation::v1::{
-    binary_reference_value, kernel_binary_reference_value, mpm_reference_value,
-    BinaryReferenceValue, C2sptLogProofReferenceValue, KernelBinaryReferenceValue,
-    MpmReferenceValue,
+    binary_reference_value, kernel_binary_reference_value, mpm_reference_value, reference_values,
+    BinaryReferenceValue, C2sptLogProofReferenceValue, CbTransparentReferenceValues,
+    KernelBinaryReferenceValue, MpmReferenceValue, OakContainersReferenceValues,
 };
 
 /// The embedded C2SP tlog-policy file.
@@ -68,21 +68,12 @@ fn get_c2sp_from_mpm_reference_value(
 }
 
 /// Returns a list of mutable references to all present `c2sp` fields in the
-/// given `Policy`.
+/// given `CbTransparentReferenceValues`.
 #[allow(deprecated)]
-fn get_c2sp_fields(policy: &mut Policy) -> Vec<&mut C2sptLogProofReferenceValue> {
-    use oak_proto_rust::oak::attestation::v1::reference_values;
-
+fn get_c2sp_fields_from_cbt(
+    cbt_reference_values: &mut CbTransparentReferenceValues,
+) -> Vec<&mut C2sptLogProofReferenceValue> {
     let mut c2sp_fields = Vec::new();
-
-    let Some(ref mut oak_ref_values) = policy.oak_reference_values else {
-        return c2sp_fields;
-    };
-
-    let Some(reference_values::Type::Cbt(ref mut cbt_reference_values)) = oak_ref_values.r#type
-    else {
-        return c2sp_fields;
-    };
 
     // root_layer -> amd_sev -> stage0
     c2sp_fields.extend(
@@ -116,6 +107,61 @@ fn get_c2sp_fields(policy: &mut Policy) -> Vec<&mut C2sptLogProofReferenceValue>
     c2sp_fields
 }
 
+/// Returns a list of mutable references to all present `c2sp` fields in the
+/// given `OakContainersReferenceValues`.
+fn get_c2sp_fields_from_oak_containers(
+    oc_reference_values: &mut OakContainersReferenceValues,
+) -> Vec<&mut C2sptLogProofReferenceValue> {
+    let mut c2sp_fields = Vec::new();
+
+    // root_layer -> amd_sev.stage0 & intel_tdx.stage0
+    if let Some(ref mut r) = oc_reference_values.root_layer {
+        if let Some(ref mut a) = r.amd_sev {
+            c2sp_fields.extend(get_c2sp_from_binary_reference_value(&mut a.stage0));
+        }
+        if let Some(ref mut t) = r.intel_tdx {
+            c2sp_fields.extend(get_c2sp_from_binary_reference_value(&mut t.stage0));
+        }
+    }
+
+    // kernel_layer -> kernel & init_ram_fs
+    if let Some(ref mut k) = oc_reference_values.kernel_layer {
+        c2sp_fields.extend(get_c2sp_from_kernel_binary_reference_value(&mut k.kernel));
+        c2sp_fields.extend(get_c2sp_from_binary_reference_value(&mut k.init_ram_fs));
+    }
+
+    // system_layer -> system_image
+    if let Some(ref mut s) = oc_reference_values.system_layer {
+        c2sp_fields.extend(get_c2sp_from_binary_reference_value(&mut s.system_image));
+    }
+
+    // container_layer -> binary & configuration
+    if let Some(ref mut c) = oc_reference_values.container_layer {
+        c2sp_fields.extend(get_c2sp_from_binary_reference_value(&mut c.binary));
+        c2sp_fields.extend(get_c2sp_from_binary_reference_value(&mut c.configuration));
+    }
+
+    c2sp_fields
+}
+
+/// Returns a list of mutable references to all present `c2sp` fields in the
+/// given `Policy`.
+fn get_c2sp_fields(policy: &mut Policy) -> Vec<&mut C2sptLogProofReferenceValue> {
+    let Some(ref mut oak_ref_values) = policy.oak_reference_values else {
+        return Vec::new();
+    };
+
+    match oak_ref_values.r#type {
+        Some(reference_values::Type::Cbt(ref mut cbt_reference_values)) => {
+            get_c2sp_fields_from_cbt(cbt_reference_values)
+        }
+        Some(reference_values::Type::OakContainers(ref mut oc_reference_values)) => {
+            get_c2sp_fields_from_oak_containers(oc_reference_values)
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Injects `c2sp_policy` into all `c2sp` fields in the policy.
 pub fn inject_c2sp_policy(policy: &mut Policy, c2sp_policy: &str) -> anyhow::Result<()> {
     for c2sp_field in get_c2sp_fields(policy) {
@@ -127,7 +173,6 @@ pub fn inject_c2sp_policy(policy: &mut Policy, c2sp_policy: &str) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oak_proto_rust::oak::attestation::v1::reference_values;
 
     /// Stand-in policy text. `inject_c2sp_policy` stores the string verbatim,
     /// so its content is irrelevant to these tests.
@@ -241,6 +286,49 @@ mod tests {
         //    + 2 (kernel, init_ram_fs) + 2 (runtime_agent_binary, userspace)
         //    + 1 (binary_mpm) + 2 (binary_mpms) = 8
         assert_eq!(fields.len(), 8);
+    }
+
+    #[test]
+    fn test_get_c2sp_fields_oak_containers_extracts_all_layers() {
+        use oak_proto_rust::oak::attestation::v1::{
+            AmdSevReferenceValues, ContainerLayerReferenceValues, IntelTdxReferenceValues,
+            KernelLayerReferenceValues, OakContainersReferenceValues, ReferenceValues,
+            RootLayerReferenceValues, SystemLayerReferenceValues,
+        };
+
+        let mut policy = Policy {
+            oak_reference_values: Some(ReferenceValues {
+                r#type: Some(reference_values::Type::OakContainers(OakContainersReferenceValues {
+                    root_layer: Some(RootLayerReferenceValues {
+                        amd_sev: Some(AmdSevReferenceValues {
+                            stage0: Some(mock_binary_ref_value()),
+                            ..Default::default()
+                        }),
+                        intel_tdx: Some(IntelTdxReferenceValues {
+                            stage0: Some(mock_binary_ref_value()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    kernel_layer: Some(KernelLayerReferenceValues {
+                        kernel: Some(mock_kernel_binary_ref_value()),
+                        init_ram_fs: Some(mock_binary_ref_value()),
+                        ..Default::default()
+                    }),
+                    system_layer: Some(SystemLayerReferenceValues {
+                        system_image: Some(mock_binary_ref_value()),
+                    }),
+                    container_layer: Some(ContainerLayerReferenceValues {
+                        binary: Some(mock_binary_ref_value()),
+                        configuration: Some(mock_binary_ref_value()),
+                    }),
+                })),
+            }),
+            ..Default::default()
+        };
+
+        let fields = get_c2sp_fields(&mut policy);
+        assert_eq!(fields.len(), 7);
     }
 
     #[test]

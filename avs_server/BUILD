@@ -44,6 +44,7 @@ AVS_SERVER_LIB_DEPS = [
     "@oak//oak_time:oak_time_std",
     "@oak_crates_index//:anyhow",
     "@oak_crates_index//:log",
+    "@oak_crates_index//:p256",
     "@oak_crates_index//:prost-types",
     "@oak_crates_index//:serde",
     "@oak_crates_index//:serde_json",
@@ -124,6 +125,10 @@ rust_test(
     name = "avs_server_lib_unit_test",
     size = "small",
     crate = ":avs_server_lib",
+    deps = [
+        "@oak_crates_index//:coset",
+        "@oak_crates_index//:prost",
+    ],
 )
 
 rust_test(

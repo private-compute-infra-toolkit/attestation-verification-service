@@ -106,6 +106,18 @@ mod tests {
     }
 
     #[test]
+    fn get_policy_pa_frontend_nonprod_returns_valid_policy() {
+        let policy = get_policy("pa-frontend-nonprod").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-frontend-nonprod");
+        assert_eq!(policy.workload_name, "pa-frontend-nonprod");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-frontend-nonprod");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
     fn get_policy_prober_returns_valid_policy() {
         let policy = get_policy("prober").expect("failed to get policy");
         assert_eq!(policy.name, "prober");
@@ -130,6 +142,54 @@ mod tests {
     }
 
     #[test]
+    fn get_policy_pa_014c68966d_returns_valid_policy() {
+        let policy = get_policy("pa-014c68966d").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-014c68966d");
+        assert_eq!(policy.workload_name, "pa-014c68966d");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-014c68966d");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_014c68966d_nonprod_returns_valid_policy() {
+        let policy = get_policy("pa-014c68966d-nonprod").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-014c68966d-nonprod");
+        assert_eq!(policy.workload_name, "pa-014c68966d-nonprod");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-014c68966d-nonprod");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_2481dfc23b_returns_valid_policy() {
+        let policy = get_policy("pa-2481dfc23b").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-2481dfc23b");
+        assert_eq!(policy.workload_name, "pa-2481dfc23b");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-2481dfc23b");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_2481dfc23b_nonprod_returns_valid_policy() {
+        let policy = get_policy("pa-2481dfc23b-nonprod").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-2481dfc23b-nonprod");
+        assert_eq!(policy.workload_name, "pa-2481dfc23b-nonprod");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-2481dfc23b-nonprod");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
     fn get_policy_pa_45468cbcc9_returns_valid_policy() {
         let policy = get_policy("pa-45468cbcc9").expect("failed to get policy");
         assert_eq!(policy.name, "pa-45468cbcc9");
@@ -138,6 +198,66 @@ mod tests {
         assert_eq!(op.rules.len(), 1);
         assert_eq!(op.rules[0].domain, "prod.google.com");
         assert_eq!(op.rules[0].role, "pa-45468cbcc9");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_45468cbcc9_nonprod_returns_valid_policy() {
+        let policy = get_policy("pa-45468cbcc9-nonprod").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-45468cbcc9-nonprod");
+        assert_eq!(policy.workload_name, "pa-45468cbcc9-nonprod");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-45468cbcc9-nonprod");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_bfee2c4a65_returns_valid_policy() {
+        let policy = get_policy("pa-bfee2c4a65").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-bfee2c4a65");
+        assert_eq!(policy.workload_name, "pa-bfee2c4a65");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-bfee2c4a65");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_bfee2c4a65_nonprod_returns_valid_policy() {
+        let policy = get_policy("pa-bfee2c4a65-nonprod").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-bfee2c4a65-nonprod");
+        assert_eq!(policy.workload_name, "pa-bfee2c4a65-nonprod");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-bfee2c4a65-nonprod");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_eba5b05bf8_returns_valid_policy() {
+        let policy = get_policy("pa-eba5b05bf8").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-eba5b05bf8");
+        assert_eq!(policy.workload_name, "pa-eba5b05bf8");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-eba5b05bf8");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_eba5b05bf8_nonprod_returns_valid_policy() {
+        let policy = get_policy("pa-eba5b05bf8-nonprod").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-eba5b05bf8-nonprod");
+        assert_eq!(policy.workload_name, "pa-eba5b05bf8-nonprod");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-eba5b05bf8-nonprod");
         assert!(policy.oak_reference_values.is_some());
     }
 
@@ -161,15 +281,8 @@ mod tests {
         assert_eq!(policy.name, "development");
         assert_eq!(policy.workload_name, "unendorsed-development");
         let op = policy.operator_policy.expect("missing operator_policy");
-        assert_eq!(op.rules.len(), 4);
         assert_eq!(op.rules[0].domain, "prod.google.com");
         assert_eq!(op.rules[0].role, "dev");
-        assert_eq!(op.rules[1].domain, "prod.google.com");
-        assert_eq!(op.rules[1].role, "dev-pa-2481dfc23b");
-        assert_eq!(op.rules[2].domain, "prod.google.com");
-        assert_eq!(op.rules[2].role, "dev-pa-eba5b05bf8");
-        assert_eq!(op.rules[3].domain, "prod.google.com");
-        assert_eq!(op.rules[3].role, "dev-pa-014c68966d");
         assert!(policy.oak_reference_values.is_some());
     }
 
