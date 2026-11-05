@@ -81,7 +81,9 @@ oak_reference_values {
               }
             }
             tlog {
-              all {
+              any {
+              }
+              c2sp {
               }
               pes {
               }
@@ -151,7 +153,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -207,7 +211,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -277,7 +283,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -353,15 +361,13 @@ oak_reference_values {
               key_id: 12
               raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004t\347\356\345c\266\261\223\233s\357}\316\005]\017\014\024&\264\202\026Fi\027\226\257?\004\316\356\334\256\377\364\300\227\217)\320\224\271\307#F\331\211s\313EZw\234\000\347\376\274\312Jc\367%\304T"
             }
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 13
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004\267Fw\352YD\206]!\033g\272\370\237\305\236\003W\330l\243\021\013t\255W3\261\312\000C9h^}\370\177\027/]Bo&\027U;\366\345\'I\324]Gj\246!X\357\244\321\206y\362Y"
+            }
           }
           required_claims {
-            claims {
-              type: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
-              annotations {
-                key: "publisher_id"
-                value: "pcit-release-bot@google.com"
-              }
-            }
             claims {
               type: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/workload.md"
               annotations {
@@ -371,7 +377,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -427,7 +435,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }

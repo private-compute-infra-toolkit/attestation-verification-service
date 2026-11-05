@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 1.5.0 (2026-11-05)
+
+
+### Dependencies
+
+* **deps:** Update policies (diff hash: c9953dac)
+* **deps:** Update policies (diff hash: d78d9be8)
+
 ## 1.4.0 (2026-10-29)
 
 

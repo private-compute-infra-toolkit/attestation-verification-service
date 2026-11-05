@@ -81,7 +81,9 @@ oak_reference_values {
               }
             }
             tlog {
-              all {
+              any {
+              }
+              c2sp {
               }
               pes {
               }
@@ -151,7 +153,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -207,7 +211,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -277,7 +283,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -331,13 +339,6 @@ oak_reference_values {
           }
           required_claims {
             claims {
-              type: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
-              annotations {
-                key: "publisher_id"
-                value: "pcit-release-bot@google.com"
-              }
-            }
-            claims {
               type: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/workload.md"
               annotations {
                 key: "workload_id"
@@ -346,7 +347,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -402,7 +405,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }

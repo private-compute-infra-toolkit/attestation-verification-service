@@ -81,7 +81,9 @@ oak_reference_values {
               }
             }
             tlog {
-              all {
+              any {
+              }
+              c2sp {
               }
               pes {
               }
@@ -151,7 +153,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -207,7 +211,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -277,7 +283,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -303,15 +311,13 @@ oak_reference_values {
               key_id: 2
               raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004f\014B\351\340Q\222\036n#\214\221-\333\005\3123\371\336\006\322\232`\263\001\216\340_\217Y\006\2748\014\207mm9\272e\r\241n\316$\217\372zC\037\'>\034\235\363q\272\265([N\311E\331"
             }
+            keys {
+              type: KEY_TYPE_ECDSA_P256_SHA256
+              key_id: 3
+              raw: "0Y0\023\006\007*\206H\316=\002\001\006\010*\206H\316=\003\001\007\003B\000\004\305\206\324\336\356K]U]\003\000\302\261,f\177\212,Q\000F\006\217DH\037\257q\343\307\334k\304n\305\347\002<\253\304\304\223\277\n\216\270\223e\233\272\371+\322\261\335\251\366FP\335\276\206\330\234"
+            }
           }
           required_claims {
-            claims {
-              type: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/publisher.md"
-              annotations {
-                key: "publisher_id"
-                value: "pcit-release-bot@google.com"
-              }
-            }
             claims {
               type: "https://github.com/private-compute-infra-toolkit/public-endorsement-service/blob/main/docs/claims/workload.md"
               annotations {
@@ -321,7 +327,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
@@ -377,7 +385,9 @@ oak_reference_values {
             }
           }
           tlog {
-            all {
+            any {
+            }
+            c2sp {
             }
             pes {
             }
