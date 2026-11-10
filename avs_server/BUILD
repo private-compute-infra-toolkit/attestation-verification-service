@@ -27,6 +27,8 @@ AVS_SERVER_LIB_SRCS = [
     "src/ca.rs",
     "src/config.rs",
     "src/csr.rs",
+    "src/layer2_policy.rs",
+    "src/layer2_shadow.rs",
     "src/lib.rs",
     "src/operator_info.rs",
     "src/server.rs",
@@ -44,10 +46,13 @@ AVS_SERVER_LIB_DEPS = [
     "@oak//oak_time:oak_time_std",
     "@oak_crates_index//:anyhow",
     "@oak_crates_index//:log",
+    "@oak_crates_index//:opentelemetry",
     "@oak_crates_index//:p256",
+    "@oak_crates_index//:prost",
     "@oak_crates_index//:prost-types",
     "@oak_crates_index//:serde",
     "@oak_crates_index//:serde_json",
+    "@oak_crates_index//:sha2",
     "@oak_crates_index//:tokio",
     "@oak_crates_index//:tokio-stream",
     "@oak_crates_index//:tonic",
@@ -138,6 +143,17 @@ rust_test(
     compile_data = ["//avs_server/policies:prod-verifier.policy"],
     deps = [
         "@oak//tr/c2sp",
+    ],
+)
+
+rust_test(
+    name = "embedded_policies_test",
+    size = "small",
+    srcs = ["tests/embedded_policies_test.rs"],
+    deps = [
+        ":avs_server_lib",
+        "//avs_server/proto_rust:avs_proto_rust",
+        "@oak//oak_proto_rust",
     ],
 )
 

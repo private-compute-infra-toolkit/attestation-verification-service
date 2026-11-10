@@ -34,6 +34,7 @@ jobs:
 
       - name: 'Run tests'
         run: |
+          (cd avs_client && ../devkit/build bazel test //...)
           devkit/build bazel test //...
 
       - name: 'Upload devkit logs'

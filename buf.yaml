@@ -15,3 +15,4 @@
 version: v2
 modules:
   - path: avs_server
+  - path: proto

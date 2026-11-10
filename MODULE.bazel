@@ -139,9 +139,9 @@ archive_override(
 bazel_dep(name = "oak", version = "0.0.0")
 archive_override(
     module_name = "oak",
-    sha256 = "15f99b978b1772a04155e4b2499f5aae0b08c7e3a70aa10130cf3ca6d7573f15",
-    strip_prefix = "oak-a109fb141df0338a43bee004afce3230b2d3bb8b",
-    url = "https://github.com/project-oak/oak/archive/a109fb141df0338a43bee004afce3230b2d3bb8b.tar.gz",
+    sha256 = "31ed43c19a52955c3c2dd8907d87c74716e407a72faf3d735acc596f07075f13",
+    strip_prefix = "oak-175e9d08ebb653a1176a62c98ffaed9975db5a01",
+    url = "https://github.com/project-oak/oak/archive/175e9d08ebb653a1176a62c98ffaed9975db5a01.tar.gz",
 )
 
 oak_aliased_crates = use_extension(
@@ -160,6 +160,12 @@ bazel_dep(name = "pcit_api", version = "0.0.0")
 local_path_override(
     module_name = "pcit_api",
     path = "third_party/tca-sdk/api",
+)
+
+bazel_dep(name = "avs_proto", version = "0.0.1")
+local_path_override(
+    module_name = "avs_proto",
+    path = "proto",
 )
 
 single_version_override(

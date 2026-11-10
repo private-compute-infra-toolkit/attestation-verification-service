@@ -16,6 +16,7 @@ server binary.
 | ----------------- | ------------------------------------------------------------------------------------- |
 | `pa-014c68966d/`  | `pa-014c68966d`, `pa-014c68966d-nonprod`                                              |
 | `pa-2481dfc23b/`  | `pa-2481dfc23b`, `pa-2481dfc23b-nonprod`                                              |
+| `pa-3b327f803b/`  | `pa-3b327f803b`                                                                       |
 | `pa-45468cbcc9/`  | `pa-45468cbcc9`, `pa-45468cbcc9-nonprod`                                              |
 | `pa-bfee2c4a65/`  | `pa-bfee2c4a65`, `pa-bfee2c4a65-nonprod`                                              |
 | `pa-eba5b05bf8/`  | `pa-eba5b05bf8`, `pa-eba5b05bf8-nonprod`                                              |

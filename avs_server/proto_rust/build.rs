@@ -13,8 +13,16 @@
 // limitations under the License.
 
 use std::env;
+use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let avs_proto_path = env::var("AVS_PROTO_PATH")?;
+    let avs_proto_dir = Path::new(&avs_proto_path)
+        .parent()
+        .ok_or("AVS_PROTO_PATH must have a parent directory")?
+        .to_str()
+        .ok_or("AVS_PROTO_PATH parent must be UTF-8")?;
+
     let protobuf_include_path =
         &env::var("DESCRIPTOR_PROTO_PATH").unwrap().replace("google/protobuf/descriptor.proto", "");
 
@@ -41,8 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .extern_path(".oak.attestation.v1", "::oak_proto_rust::oak::attestation::v1")
         .compile_protos(
-            &["../proto/attestation_verification.proto", "../proto/policy.proto"],
-            &["../", "../../", protobuf_include_path, oak_include_path],
+            &[avs_proto_path.as_str(), "../proto/policy.proto"],
+            &[avs_proto_dir, "../", "../../", protobuf_include_path, oak_include_path],
         )?;
 
     Ok(())

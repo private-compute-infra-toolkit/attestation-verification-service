@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 1.6.0 (2026-11-10)
+
+
+### Dependencies
+
+* **deps:** update Oak pin to 175e9d08
+* **deps:** Update policies (diff hash: 2e20c078)
+* **deps:** Update policies (diff hash: 4e24f634)
+
+
+### Features
+
+* Add avs_client Oak workload library
+* add dev-pa-45468cbcc9 to dev policy
+* add pa-3b327f803b production attestation policy
+* **layer2:** add AvsLayer2Policy enforcement wrapper
+* **layer2:** add package/slot inventory to shadow evaluation
+* **layer2:** add shadow evaluation core
+* **layer2:** add shadow metrics
+* **metrics:** enable OTLP metrics infrastructure via OakObserver
+* **pes:** Support loading multiple certs from root_certificates.pem
+* **policy:** add shadow and enforcement policy schema and config
+* **server:** wire Layer-2 shadow and enforcement into CSR pipeline
+
 ## 1.5.0 (2026-11-05)
 
 

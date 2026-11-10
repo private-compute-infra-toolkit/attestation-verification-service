@@ -35,6 +35,13 @@ message OperatorPolicy {
   repeated OperatorRule rules = 1;
 }
 
+// Configuration evaluated in shadow mode only; never enforced.
+// Extensible: further shadowed fields (e.g. full reference values) will be added here.
+message ShadowPolicy {
+  // Candidate layer-2 reference values, evaluated with strict one-to-one matching.
+  oak.attestation.v1.CbLayer2TransparentReferenceValues layer2 = 1;
+}
+
 message Policy {
   string publisher_domain = 1;
   string publisher_role = 2;
@@ -47,6 +54,13 @@ message Policy {
   // Unique name identifying this policy within AVS (e.g.,
   // "encrypted_zone", "prober", "development").
   string name = 6;
+
+  // Configuration evaluated in shadow mode only; never enforced.
+  ShadowPolicy shadow = 7;
+
+  // When true, strict one-to-one matching against oak_reference_values.cbt.layer2
+  // replaces the permissive check for certificate issuance. Defaults to false.
+  bool enforce_strict_layer2 = 8;
 }
 
 // Bundle of policies for embedded policy registration.

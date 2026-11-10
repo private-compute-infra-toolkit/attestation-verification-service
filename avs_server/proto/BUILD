@@ -21,16 +21,6 @@ package(
 )
 
 proto_library(
-    name = "attestation_verification_proto",
-    srcs = ["attestation_verification.proto"],
-    deps = [
-        "@oak//proto/attestation:endorsement_proto",
-        "@oak//proto/attestation:evidence_proto",
-        "@oak//proto/attestation:verification_proto",
-    ],
-)
-
-proto_library(
     name = "policy_proto",
     srcs = ["policy.proto"],
     deps = [

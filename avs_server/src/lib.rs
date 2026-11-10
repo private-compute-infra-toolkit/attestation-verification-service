@@ -17,6 +17,8 @@
 pub mod ca;
 pub mod config;
 pub mod csr;
+pub mod layer2_policy;
+pub mod layer2_shadow;
 pub mod operator_info;
 pub mod server;
 

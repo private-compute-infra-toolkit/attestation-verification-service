@@ -16,7 +16,7 @@
 # See https://pre-commit.com/hooks.html for more hooks
 
 exclude: (?x)^(
-  bazel-(bin|out|testlogs|workspace)/.*|
+  bazel-(bin|out|testlogs|workspace|proto|avs_client)/.*|
   licenses/.* |
   third_party/.* |
   \.?devkit/.*|
@@ -41,6 +41,7 @@ repos:
       - id: check-yaml
       - id: check-symlinks
       - id: check-added-large-files
+        exclude: (^|/)MODULE\.bazel\.lock$
       - id: check-vcs-permalinks
       - id: check-executables-have-shebangs
       - id: detect-private-key

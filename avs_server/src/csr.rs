@@ -16,7 +16,10 @@
 
 use std::{sync::Arc, time::Duration};
 
-use crate::{ca::KeyPair, operator_info::OperatorInfo};
+use crate::{
+    ca::KeyPair, layer2_policy::AvsLayer2Policy, layer2_shadow::Layer2ShadowContext,
+    operator_info::OperatorInfo,
+};
 use anyhow::Context;
 use avs_proto_rust::avs::CertificateProfile;
 use oak_attestation_verification::{
@@ -24,7 +27,7 @@ use oak_attestation_verification::{
     results::{get_user_data_payload, get_validity, unique_signing_public_key},
     verifier::verify_user_data_certificate,
     AmdSevSnpPolicy, AmdSevSnpTransparentDiceAttestationVerifier, FirmwarePolicy,
-    TransparentLayer1Policy, TransparentLayer2Policy, TransparentStage0Policy,
+    TransparentLayer1Policy, TransparentStage0Policy,
 };
 use oak_attestation_verification_types::verifier::AttestationVerifier;
 use oak_proto_rust::oak::attestation::v1::{
@@ -54,20 +57,51 @@ pub(crate) struct ProvisionedIdentity {
     pub(crate) not_after_sec: i64,
 }
 
+/// Options for configuring Layer-2 verification policy and shadow evaluation.
+#[derive(Clone)]
+pub struct Layer2Options<'a> {
+    pub shadow_layer2: Option<&'a CbLayer2TransparentReferenceValues>,
+    pub enforce_strict_layer2: bool,
+    pub policy_name: &'a str,
+    pub operator_role: &'a str,
+    pub shadow_context: Layer2ShadowContext,
+}
+
+#[cfg(test)]
+impl<'a> Layer2Options<'a> {
+    fn test_default() -> Self {
+        Self {
+            shadow_layer2: None,
+            enforce_strict_layer2: false,
+            policy_name: "test_policy",
+            operator_role: "test_role",
+            shadow_context: Layer2ShadowContext::default(),
+        }
+    }
+}
+
 /// Constructs an `AmdSevSnpTransparentDiceAttestationVerifier` from individual
-/// reference value components.
+/// reference value components and Layer-2 policy options.
 fn create_transparent_verifier(
     amd_sev_rvs: &AmdSevReferenceValues,
     firmware_rvs: &BinaryReferenceValue,
     kernel_layer_rvs: &KernelLayerReferenceValues,
     layer1_rvs: &CbLayer1TransparentReferenceValues,
-    layer2_rvs: &CbLayer2TransparentReferenceValues,
+    layer2_reference_values: &CbLayer2TransparentReferenceValues,
+    layer2_options: Layer2Options<'_>,
 ) -> AmdSevSnpTransparentDiceAttestationVerifier {
     let platform_policy = AmdSevSnpPolicy::new(amd_sev_rvs);
     let firmware_policy = FirmwarePolicy::new(firmware_rvs);
     let stage0_policy = TransparentStage0Policy::new(kernel_layer_rvs);
     let layer1_policy = TransparentLayer1Policy::new(layer1_rvs);
-    let layer2_policy = TransparentLayer2Policy::new(layer2_rvs);
+    let layer2_policy = AvsLayer2Policy::new(
+        layer2_reference_values,
+        layer2_options.shadow_layer2,
+        layer2_options.enforce_strict_layer2,
+        layer2_options.policy_name.to_string(),
+        layer2_options.operator_role.to_string(),
+        layer2_options.shadow_context,
+    );
 
     AmdSevSnpTransparentDiceAttestationVerifier::new(
         platform_policy,
@@ -84,6 +118,7 @@ fn create_transparent_verifier(
 /// `AmdSevSnpTransparentDiceAttestationVerifier`.
 fn create_cbt_verifier(
     cbt_ref_values: &CbTransparentReferenceValues,
+    layer2_options: Layer2Options<'_>,
 ) -> anyhow::Result<AmdSevSnpTransparentDiceAttestationVerifier> {
     let root_layer_rvs =
         cbt_ref_values.root_layer.as_ref().context("cbt reference values missing root_layer")?;
@@ -97,7 +132,7 @@ fn create_cbt_verifier(
         .context("cbt reference values missing kernel_layer")?;
     let layer1_rvs =
         cbt_ref_values.layer1.as_ref().context("cbt reference values missing layer1")?;
-    let layer2_rvs =
+    let layer2_reference_values =
         cbt_ref_values.layer2.as_ref().context("cbt reference values missing layer2")?;
 
     Ok(create_transparent_verifier(
@@ -105,7 +140,8 @@ fn create_cbt_verifier(
         firmware_rvs,
         kernel_layer_rvs,
         layer1_rvs,
-        layer2_rvs,
+        layer2_reference_values,
+        layer2_options,
     ))
 }
 
@@ -142,15 +178,16 @@ impl AttestationVerifier for OakContainersAttestationVerifier {
 
 /// Constructs the appropriate `AttestationVerifier` for the policy's
 /// `ReferenceValues` (`Cbt` or `OakContainers`) and optional TEE platform.
-fn create_verifier(
+pub fn create_verifier(
     oak_ref_values: &ReferenceValues,
     tee_platform: Option<TeePlatform>,
+    layer2_options: Layer2Options<'_>,
 ) -> anyhow::Result<Box<dyn AttestationVerifier>> {
     use oak_proto_rust::oak::attestation::v1::reference_values;
 
     match oak_ref_values.r#type.as_ref() {
         Some(reference_values::Type::Cbt(cbt_ref_values)) => {
-            Ok(Box::new(create_cbt_verifier(cbt_ref_values)?))
+            Ok(Box::new(create_cbt_verifier(cbt_ref_values, layer2_options)?))
         }
         Some(reference_values::Type::OakContainers(_)) => {
             let platform = tee_platform.context("missing TEE platform for Oak Containers")?;
@@ -280,6 +317,7 @@ pub(crate) fn validate_csr_request(
     certificate_profile: CertificateProfile,
     operator_info: &OperatorInfo,
     policies_config: &policies::PoliciesConfig,
+    layer2_shadow_context: &Layer2ShadowContext,
 ) -> anyhow::Result<(ProvisionedIdentity, Vec<TLogVerificationResults>)> {
     use anyhow::Context;
 
@@ -307,7 +345,18 @@ pub(crate) fn validate_csr_request(
     let oak_ref_values =
         policy.oak_reference_values.as_ref().context("policy is missing oak_reference_values")?;
     let tee_platform = evidence.root_layer.as_ref().map(|r| r.platform());
-    let verifier = create_verifier(oak_ref_values, tee_platform)?;
+    let shadow_candidate = policy.shadow.as_ref().and_then(|s| s.layer2.as_ref());
+    let verifier = create_verifier(
+        oak_ref_values,
+        tee_platform,
+        Layer2Options {
+            shadow_layer2: shadow_candidate,
+            enforce_strict_layer2: policy.enforce_strict_layer2,
+            policy_name,
+            operator_role: operator_info.role(),
+            shadow_context: layer2_shadow_context.clone(),
+        },
+    )?;
     let attestation_results = verifier.verify(evidence, endorsements)?;
 
     if attestation_results.status != i32::from(Status::Success) {
@@ -737,9 +786,129 @@ mod tests {
             })),
         };
 
-        let err = create_verifier(&oak_ref_values, None).err().expect("missing tee_platform");
+        let err = create_verifier(&oak_ref_values, None, Layer2Options::test_default())
+            .err()
+            .expect("missing tee_platform");
         assert!(err.to_string().contains("missing TEE platform for Oak Containers"));
-        assert!(create_verifier(&oak_ref_values, Some(TeePlatform::Unspecified)).is_err());
-        assert!(create_verifier(&oak_ref_values, Some(TeePlatform::None)).is_ok());
+        assert!(create_verifier(
+            &oak_ref_values,
+            Some(TeePlatform::Unspecified),
+            Layer2Options::test_default()
+        )
+        .is_err());
+        assert!(create_verifier(
+            &oak_ref_values,
+            Some(TeePlatform::None),
+            Layer2Options::test_default()
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn create_verifier_cbt_success() {
+        use oak_proto_rust::oak::attestation::v1::{
+            reference_values, AmdSevReferenceValues, BinaryReferenceValue,
+            CbLayer1TransparentReferenceValues, CbLayer2TransparentReferenceValues,
+            CbTransparentReferenceValues, KernelLayerReferenceValues, RootLayerReferenceValues,
+        };
+
+        let cbt = CbTransparentReferenceValues {
+            root_layer: Some(RootLayerReferenceValues {
+                amd_sev: Some(AmdSevReferenceValues {
+                    stage0: Some(BinaryReferenceValue::default()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            kernel_layer: Some(KernelLayerReferenceValues::default()),
+            layer1: Some(CbLayer1TransparentReferenceValues::default()),
+            layer2: Some(CbLayer2TransparentReferenceValues::default()),
+        };
+        let oak_ref_values = ReferenceValues { r#type: Some(reference_values::Type::Cbt(cbt)) };
+
+        // Permissive mode without shadow candidate
+        let verifier = create_verifier(&oak_ref_values, None, Layer2Options::test_default());
+        assert!(verifier.is_ok());
+
+        // Strict mode with shadow candidate
+        let shadow_candidate = CbLayer2TransparentReferenceValues::default();
+        let verifier_strict = create_verifier(
+            &oak_ref_values,
+            None,
+            Layer2Options {
+                shadow_layer2: Some(&shadow_candidate),
+                enforce_strict_layer2: true,
+                policy_name: "test_policy",
+                operator_role: "test_role",
+                shadow_context: Layer2ShadowContext::default(),
+            },
+        );
+        assert!(verifier_strict.is_ok());
+    }
+
+    #[test]
+    fn create_verifier_cbt_missing_fields_fail() {
+        use oak_proto_rust::oak::attestation::v1::{
+            reference_values, AmdSevReferenceValues, BinaryReferenceValue,
+            CbLayer1TransparentReferenceValues, CbTransparentReferenceValues,
+            KernelLayerReferenceValues, RootLayerReferenceValues,
+        };
+
+        // Missing root_layer
+        let mut cbt = CbTransparentReferenceValues::default();
+        let ref_vals = ReferenceValues { r#type: Some(reference_values::Type::Cbt(cbt.clone())) };
+        let err = create_verifier(&ref_vals, None, Layer2Options::test_default())
+            .err()
+            .expect("expected error");
+        assert!(err.to_string().contains("cbt reference values missing root_layer"));
+
+        // Missing amd_sev
+        cbt.root_layer = Some(RootLayerReferenceValues::default());
+        let ref_vals = ReferenceValues { r#type: Some(reference_values::Type::Cbt(cbt.clone())) };
+        let err = create_verifier(&ref_vals, None, Layer2Options::test_default())
+            .err()
+            .expect("expected error");
+        assert!(err.to_string().contains("root_layer reference values missing amd_sev"));
+
+        // Missing stage0
+        cbt.root_layer = Some(RootLayerReferenceValues {
+            amd_sev: Some(AmdSevReferenceValues::default()),
+            ..Default::default()
+        });
+        let ref_vals = ReferenceValues { r#type: Some(reference_values::Type::Cbt(cbt.clone())) };
+        let err = create_verifier(&ref_vals, None, Layer2Options::test_default())
+            .err()
+            .expect("expected error");
+        assert!(err.to_string().contains("amd_sev reference values missing stage0"));
+
+        // Missing kernel_layer
+        cbt.root_layer = Some(RootLayerReferenceValues {
+            amd_sev: Some(AmdSevReferenceValues {
+                stage0: Some(BinaryReferenceValue::default()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let ref_vals = ReferenceValues { r#type: Some(reference_values::Type::Cbt(cbt.clone())) };
+        let err = create_verifier(&ref_vals, None, Layer2Options::test_default())
+            .err()
+            .expect("expected error");
+        assert!(err.to_string().contains("cbt reference values missing kernel_layer"));
+
+        // Missing layer1
+        cbt.kernel_layer = Some(KernelLayerReferenceValues::default());
+        let ref_vals = ReferenceValues { r#type: Some(reference_values::Type::Cbt(cbt.clone())) };
+        let err = create_verifier(&ref_vals, None, Layer2Options::test_default())
+            .err()
+            .expect("expected error");
+        assert!(err.to_string().contains("cbt reference values missing layer1"));
+
+        // Missing layer2
+        cbt.layer1 = Some(CbLayer1TransparentReferenceValues::default());
+        let ref_vals = ReferenceValues { r#type: Some(reference_values::Type::Cbt(cbt.clone())) };
+        let err = create_verifier(&ref_vals, None, Layer2Options::test_default())
+            .err()
+            .expect("expected error");
+        assert!(err.to_string().contains("cbt reference values missing layer2"));
     }
 }

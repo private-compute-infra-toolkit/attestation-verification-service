@@ -18,8 +18,8 @@ use anyhow::Context;
 use avs_proto_rust::avs::attestation_verification_server::AttestationVerificationServer;
 use avs_server_lib::config::AppConfig;
 use avs_server_lib::server::AttestationVerificationService;
-use log::info;
-use oak_sdk_containers::{default_orchestrator_channel, OrchestratorClient};
+use log::{info, warn};
+use oak_sdk_containers::{default_orchestrator_channel, OakObserver, OrchestratorClient};
 use std::sync::Arc;
 use tca_common::TcaClient;
 use tca_oak::OakTcaClient;
@@ -50,6 +50,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("AVS: use_self_signed_cert: {}", config.use_self_signed_cert);
 
+    info!("AVS: Initializing OakObserver at {}", config.otlp_endpoint);
+    let _observer =
+        match OakObserver::create(config.otlp_endpoint.clone(), "avs_server", Vec::new()) {
+            Ok(observer) => {
+                info!("AVS: OakObserver initialized successfully");
+                Some(observer)
+            }
+            Err(e) => {
+                warn!("AVS: Failed to initialize OakObserver, metrics disabled: {:?}", e);
+                None
+            }
+        };
+
+    let layer2_shadow_context = if config.layer2_shadow_enabled {
+        info!("AVS: Layer-2 shadow evaluation enabled");
+        let metrics = if let Some(ref observer) = _observer {
+            info!("AVS: Layer-2 shadow metrics initialized with OakObserver meter");
+            Some(Arc::new(avs_server_lib::layer2_shadow::ShadowMetrics::new(&observer.meter)))
+        } else {
+            None
+        };
+        avs_server_lib::layer2_shadow::Layer2ShadowContext::new(
+            avs_server_lib::layer2_shadow::ShadowSettings { enabled: true },
+            metrics,
+        )
+    } else {
+        info!("AVS: Layer-2 shadow evaluation disabled");
+        avs_server_lib::layer2_shadow::Layer2ShadowContext::default()
+    };
+
     info!("AVS: Creating AttestationVerificationService");
     let tca_client: Option<Arc<dyn TcaClient>> = if !config.use_self_signed_cert {
         let tca_endpoint = config.tca_endpoint;
@@ -70,8 +100,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         include_development_policy: config.include_development_policy,
         enable_c2sp_tlog: config.enable_c2sp_tlog,
     };
-    let attestation_verification_service =
-        AttestationVerificationService::new_with_policies_config(tca_client, policies_config);
+    let attestation_verification_service = AttestationVerificationService::new_with_options(
+        tca_client,
+        policies_config,
+        layer2_shadow_context,
+    );
     info!("AVS: AttestationVerificationService created.");
 
     info!("AVS: Building gRPC server...");

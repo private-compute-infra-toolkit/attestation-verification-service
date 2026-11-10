@@ -37,6 +37,8 @@ jobs:
 
       - name: 'Run build'
         run: |
+          (cd proto && ../devkit/build bazel build //...)
+          (cd avs_client && ../devkit/build bazel build //...)
           devkit/build bazel build //...
           devkit/check_checksums
           mkdir -p artifacts

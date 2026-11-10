@@ -85,5 +85,5 @@ sh_binary(
 
 filegroup(
     name = "pes_certs",
-    srcs = glob(["resources/pcit_root_certs/prod/pes-cert/**/*"]),
+    srcs = ["resources/pcit_root_certs/prod/pes-cert/root_certificates.pem"],
 )

@@ -1,0 +1,97 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""AVS client library for Oak Containers workloads."""
+
+module(
+    name = "avs_client",
+    version = "0.0.1",
+)
+
+bazel_dep(name = "avs_proto", version = "0.0.1")
+local_path_override(
+    module_name = "avs_proto",
+    path = "../proto",
+)
+
+bazel_dep(name = "protobuf", version = "33.4", repo_name = "com_google_protobuf")
+bazel_dep(name = "rules_cc", version = "0.2.19")
+bazel_dep(name = "rules_proto", version = "7.1.0")
+bazel_dep(name = "rules_rust", version = "0.70.0")
+bazel_dep(name = "googleapis", version = "0.0.0-20251211-05f65958")
+single_version_override(
+    module_name = "googleapis",
+    version = "0.0.0-20251111-659ea6e9",
+)
+
+single_version_override(
+    module_name = "rules_apple",
+    version = "3.16.0",
+)
+
+single_version_override(
+    module_name = "rules_python",
+    version = "1.5.1",
+)
+
+bazel_dep(
+    name = "toolchains_llvm_bootstrapped",
+    version = "0.2.4",
+    dev_dependency = True,
+)
+
+register_toolchains(
+    "@toolchains_llvm_bootstrapped//toolchain:linux_amd64",
+    dev_dependency = True,
+)
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2021",
+    versions = ["1.86.0"],
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+bazel_dep(name = "oak", version = "0.0.0")
+archive_override(
+    module_name = "oak",
+    sha256 = "15f99b978b1772a04155e4b2499f5aae0b08c7e3a70aa10130cf3ca6d7573f15",
+    strip_prefix = "oak-a109fb141df0338a43bee004afce3230b2d3bb8b",
+    url = "https://github.com/project-oak/oak/archive/a109fb141df0338a43bee004afce3230b2d3bb8b.tar.gz",
+)
+
+oak_aliased_crates = use_extension(
+    "@oak//bazel/crates:extensions.bzl",
+    "aliased_crates_repository",
+)
+use_repo(oak_aliased_crates, "oak_crates_index")
+
+bazel_dep(name = "tca-sdk", version = "0.0.0")
+local_path_override(
+    module_name = "tca-sdk",
+    path = "../third_party/tca-sdk",
+)
+
+register_toolchains(
+    "@tca-sdk//:prost_toolchain",
+    dev_dependency = True,
+)
+
+bazel_dep(name = "pcit_api", version = "0.0.0")
+local_path_override(
+    module_name = "pcit_api",
+    path = "../third_party/tca-sdk/api",
+)

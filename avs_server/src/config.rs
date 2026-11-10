@@ -32,7 +32,15 @@ fn default_enable_c2sp_tlog() -> bool {
     false
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+fn default_layer2_shadow_enabled() -> bool {
+    true
+}
+
+fn default_otlp_endpoint() -> String {
+    "http://10.0.2.100:8080".to_string()
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct AppConfig {
     #[serde(default = "default_use_self_signed_cert")]
     pub use_self_signed_cert: bool,
@@ -42,6 +50,12 @@ pub struct AppConfig {
     pub include_development_policy: bool,
     #[serde(default = "default_enable_c2sp_tlog")]
     pub enable_c2sp_tlog: bool,
+    #[serde(default = "default_otlp_endpoint")]
+    pub otlp_endpoint: String,
+    // Note: Using the untrusted host config for shadow mode is acceptable ONLY because
+    // shadow mode has no effect on certificate issuance decisions (observability-only).
+    #[serde(default = "default_layer2_shadow_enabled")]
+    pub layer2_shadow_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -51,6 +65,8 @@ impl Default for AppConfig {
             tca_endpoint: default_tca_endpoint(),
             include_development_policy: default_include_development_policy(),
             enable_c2sp_tlog: default_enable_c2sp_tlog(),
+            otlp_endpoint: default_otlp_endpoint(),
+            layer2_shadow_enabled: default_layer2_shadow_enabled(),
         }
     }
 }
@@ -67,16 +83,20 @@ mod tests {
         assert_eq!(config.tca_endpoint, "http://10.0.2.100:8008");
         assert!(config.include_development_policy);
         assert!(!config.enable_c2sp_tlog);
+        assert_eq!(config.otlp_endpoint, "http://10.0.2.100:8080");
+        assert!(config.layer2_shadow_enabled);
     }
 
     #[test]
     fn test_custom_values_applied() {
-        let json_str = r#"{"use_self_signed_cert": true, "tca_endpoint": "http://example.com", "include_development_policy": false, "enable_c2sp_tlog": true}"#;
+        let json_str = r#"{"use_self_signed_cert": true, "tca_endpoint": "http://example.com", "include_development_policy": false, "enable_c2sp_tlog": true, "otlp_endpoint": "http://custom:4317", "layer2_shadow_enabled": false}"#;
         let config: AppConfig = serde_json::from_str(json_str).unwrap();
         assert!(config.use_self_signed_cert);
         assert_eq!(config.tca_endpoint, "http://example.com");
         assert!(!config.include_development_policy);
         assert!(config.enable_c2sp_tlog);
+        assert_eq!(config.otlp_endpoint, "http://custom:4317");
+        assert!(!config.layer2_shadow_enabled);
     }
 
     #[test]

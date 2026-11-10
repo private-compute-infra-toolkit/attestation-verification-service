@@ -40,6 +40,7 @@ policy_bundle(
         "//avs_server/policies/pa-014c68966d:policy_nonprod_binarypb",
         "//avs_server/policies/pa-2481dfc23b:policy_binarypb",
         "//avs_server/policies/pa-2481dfc23b:policy_nonprod_binarypb",
+        "//avs_server/policies/pa-3b327f803b:policy_binarypb",
         "//avs_server/policies/pa-45468cbcc9:policy_binarypb",
         "//avs_server/policies/pa-45468cbcc9:policy_nonprod_binarypb",
         "//avs_server/policies/pa-bfee2c4a65:policy_binarypb",
@@ -64,8 +65,8 @@ rust_library(
     crate_root = "policy.rs",
     deps = [
         "//avs_server/proto_rust:avs_proto_rust",
-        "@boringssl//rust/bssl-sys",
         "@crates//:glob",
+        "@crates//:x509-cert",
         "@oak//oak_proto_rust",
         "@oak_crates_index//:anyhow",
         "@oak_crates_index//:prost",
@@ -78,6 +79,8 @@ rust_test(
     size = "small",
     crate = ":policies",
     deps = [
+        "@oak//oak_attestation_verification",
+        "@oak//oak_attestation_verification:test_util",
         "@oak_crates_index//:tempfile",
     ],
 )

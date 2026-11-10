@@ -110,6 +110,19 @@ async fn create_test_server_with_config(
     mode: ServerMode,
     policies_config: policies::PoliciesConfig,
 ) -> anyhow::Result<TestServer> {
+    create_test_server_with_options(
+        mode,
+        policies_config,
+        avs_server_lib::layer2_shadow::Layer2ShadowContext::default(),
+    )
+    .await
+}
+
+async fn create_test_server_with_options(
+    mode: ServerMode,
+    policies_config: policies::PoliciesConfig,
+    layer2_shadow_context: avs_server_lib::layer2_shadow::Layer2ShadowContext,
+) -> anyhow::Result<TestServer> {
     let sockaddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
     let listener = TcpListener::bind(sockaddr).await?;
     let port = listener.local_addr()?.port();
@@ -117,15 +130,18 @@ async fn create_test_server_with_config(
     let shutdown_notify_copy = shutdown_notify.clone();
 
     let attestation_verification_service = match mode {
-        ServerMode::SelfSigning => {
-            AttestationVerificationService::new_with_policies_config(None, policies_config)
-        }
+        ServerMode::SelfSigning => AttestationVerificationService::new_with_options(
+            None,
+            policies_config,
+            layer2_shadow_context,
+        ),
         ServerMode::TcaMock => {
             let mock_client = MockTcaClient::new();
             let tca_client: Arc<dyn tca_common::TcaClient> = std::sync::Arc::new(mock_client);
-            AttestationVerificationService::new_with_policies_config(
+            AttestationVerificationService::new_with_options(
                 Some(tca_client),
                 policies_config,
+                layer2_shadow_context,
             )
         }
     };
@@ -1857,6 +1873,52 @@ async fn test_certify_attestation_no_selector() {
         Ok(_) => panic!("certify_attestation() should fail."),
         Err(e) => assert!(e.to_string().contains("a policy selector is required")),
     }
+
+    test_server.shutdown_notify.notify_waiters();
+    test_server.server.await.unwrap();
+}
+
+#[tokio::test]
+async fn test_valid_certify_attestation_with_shadow_enabled() {
+    let shadow_context = avs_server_lib::layer2_shadow::Layer2ShadowContext::new(
+        avs_server_lib::layer2_shadow::ShadowSettings { enabled: true },
+        None,
+    );
+    let test_server = create_test_server_with_options(
+        ServerMode::SelfSigning,
+        policies::PoliciesConfig { include_development_policy: true, ..Default::default() },
+        shadow_context,
+    )
+    .await
+    .unwrap();
+
+    let platform_endorsement = AmdSevSnpEndorsement { tee_certificate: get_milan_vcek() };
+    let empty_variant: Variant = Variant::default();
+    let endorsements = Endorsements {
+        platform: Some(platform_endorsement.into()),
+        initial: Some(empty_variant),
+        ..Default::default()
+    };
+
+    static SUBJECT: &str = "example.com";
+    let (csr_der, csr_key_pair) = generate_csr(SUBJECT).unwrap();
+    let public_key_pem = pem::parse(csr_key_pair.public_key_pem()).unwrap();
+    let public_key_der = public_key_pem.contents();
+
+    let mut evidence = get_evidence();
+    evidence.signed_user_data_certificate =
+        create_signed_user_data_certificate(public_key_der, SIGNING_PRIVATE_KEY_HEX);
+
+    let request = CertifyAttestationRequest {
+        csr: csr_der,
+        evidence: Some(evidence),
+        endorsements: Some(endorsements),
+        operator_info: Some(test_dev_operator_info()),
+        selector: params_selector("development", CertificateProfile::Unrestricted),
+    };
+
+    let response = call_certify_attestation(test_server.port, request).await.unwrap();
+    assert_eq!(response.certificate_chain.len(), 2);
 
     test_server.shutdown_notify.notify_waiters();
     test_server.server.await.unwrap();

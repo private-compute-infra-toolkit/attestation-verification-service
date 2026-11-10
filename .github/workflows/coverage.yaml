@@ -34,6 +34,7 @@ jobs:
 
       - name: 'Run coverage'
         run: |
+          (cd avs_client && ../devkit/coverage --lines 25)
           devkit/coverage --lines 25
 
       - name: 'Upload devkit logs'

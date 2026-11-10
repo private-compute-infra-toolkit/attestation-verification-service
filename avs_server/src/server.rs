@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-use crate::{ca, csr, operator_info::OperatorInfo};
+use crate::{ca, csr, layer2_shadow::Layer2ShadowContext, operator_info::OperatorInfo};
 use avs_proto_rust::avs::{
     attestation_verification_server::AttestationVerification, certify_attestation_request,
     certify_attestation_stream_request, certify_attestation_stream_response, CertificateProfile,
@@ -42,10 +42,12 @@ fn resolve_legacy_hint(
         PolicyHint::EzEnforcerCbCertificate => match operator_role {
             "prober" | "prober-staging" => Ok(("prober_ez", CertificateProfile::Mtls)),
             "pa-frontend-nonprod" => Ok(("pa-frontend-nonprod", CertificateProfile::Mtls)),
+            "pa-3b327f803b" => Ok(("pa-3b327f803b", CertificateProfile::Mtls)),
             _ => Ok(("encrypted_zone", CertificateProfile::Mtls)),
         },
         PolicyHint::EzTsmCbFrontendCertificate => match operator_role {
             "pa-frontend-nonprod" => Ok(("pa-frontend-nonprod", CertificateProfile::Tls)),
+            "pa-3b327f803b" => Ok(("pa-3b327f803b", CertificateProfile::Tls)),
             _ => Ok(("encrypted_zone", CertificateProfile::Tls)),
         },
         PolicyHint::ProberCbCertificate => Ok(("prober", CertificateProfile::Unrestricted)),
@@ -100,6 +102,7 @@ pub struct AttestationVerificationService {
     tca_client: Option<Arc<dyn tca_common::TcaClient>>,
     certificate_authority: RwLock<Option<Arc<ca::CertificateAuthority>>>,
     policies_config: policies::PoliciesConfig,
+    layer2_shadow_context: Layer2ShadowContext,
 }
 
 impl AttestationVerificationService {
@@ -108,6 +111,7 @@ impl AttestationVerificationService {
             tca_client,
             certificate_authority: RwLock::new(None),
             policies_config: policies::PoliciesConfig::default(),
+            layer2_shadow_context: Layer2ShadowContext::default(),
         }
     }
 
@@ -115,7 +119,25 @@ impl AttestationVerificationService {
         tca_client: Option<Arc<dyn tca_common::TcaClient>>,
         policies_config: policies::PoliciesConfig,
     ) -> Self {
-        Self { tca_client, certificate_authority: RwLock::new(None), policies_config }
+        Self {
+            tca_client,
+            certificate_authority: RwLock::new(None),
+            policies_config,
+            layer2_shadow_context: Layer2ShadowContext::default(),
+        }
+    }
+
+    pub fn new_with_options(
+        tca_client: Option<Arc<dyn tca_common::TcaClient>>,
+        policies_config: policies::PoliciesConfig,
+        layer2_shadow_context: Layer2ShadowContext,
+    ) -> Self {
+        Self {
+            tca_client,
+            certificate_authority: RwLock::new(None),
+            policies_config,
+            layer2_shadow_context,
+        }
     }
 
     /// Returns the DER-encoded CA certificate chain, if the certificate
@@ -167,6 +189,7 @@ impl AttestationVerification for AttestationVerificationService {
             certificate_profile,
             &operator_info,
             &self.policies_config,
+            &self.layer2_shadow_context,
         )
         .map_err(|e| Status::new(tonic::Code::FailedPrecondition, format!("{e:?}")))?;
         let cert = certificate_authority.generate_certificate(&identity).map_err(|e| {
@@ -198,6 +221,7 @@ impl AttestationVerification for AttestationVerificationService {
 
         let mut stream = request.into_inner();
         let policies_config = self.policies_config.clone();
+        let layer2_shadow_context = self.layer2_shadow_context.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(1);
 
         tokio::spawn(async move {
@@ -308,6 +332,7 @@ impl AttestationVerification for AttestationVerificationService {
                 certificate_profile,
                 &operator_info,
                 &policies_config,
+                &layer2_shadow_context,
             ) {
                 Ok((identity, tlog_verification_results)) => {
                     match certificate_authority.generate_certificate(&identity) {
@@ -404,6 +429,10 @@ mod tests {
             ("pa-frontend-nonprod", CertificateProfile::Mtls)
         );
         assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "pa-3b327f803b").unwrap(),
+            ("pa-3b327f803b", CertificateProfile::Mtls)
+        );
+        assert_eq!(
             resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "prober").unwrap(),
             ("prober_ez", CertificateProfile::Mtls)
         );
@@ -419,6 +448,10 @@ mod tests {
             resolve_legacy_hint(PolicyHint::EzTsmCbFrontendCertificate, "pa-frontend-nonprod")
                 .unwrap(),
             ("pa-frontend-nonprod", CertificateProfile::Tls)
+        );
+        assert_eq!(
+            resolve_legacy_hint(PolicyHint::EzTsmCbFrontendCertificate, "pa-3b327f803b").unwrap(),
+            ("pa-3b327f803b", CertificateProfile::Tls)
         );
         assert_eq!(
             resolve_legacy_hint(PolicyHint::ProberCbCertificate, "prober").unwrap(),

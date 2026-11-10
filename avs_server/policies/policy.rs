@@ -45,6 +45,13 @@ fn policy_registry() -> &'static HashMap<String, Policy> {
     REGISTRY.get_or_init(|| build_policy_registry(POLICY_BUNDLE))
 }
 
+/// Returns the list of all registered embedded policy names in sorted order.
+pub fn list_policy_names() -> Vec<String> {
+    let mut names: Vec<String> = policy_registry().keys().cloned().collect();
+    names.sort();
+    names
+}
+
 /// Configuration options for looking up and validating policies.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PoliciesConfig {
@@ -186,6 +193,18 @@ mod tests {
         assert_eq!(op.rules.len(), 1);
         assert_eq!(op.rules[0].domain, "prod.google.com");
         assert_eq!(op.rules[0].role, "pa-2481dfc23b-nonprod");
+        assert!(policy.oak_reference_values.is_some());
+    }
+
+    #[test]
+    fn get_policy_pa_3b327f803b_returns_valid_policy() {
+        let policy = get_policy("pa-3b327f803b").expect("failed to get policy");
+        assert_eq!(policy.name, "pa-3b327f803b");
+        assert_eq!(policy.workload_name, "pa-3b327f803b");
+        let op = policy.operator_policy.expect("missing operator_policy");
+        assert_eq!(op.rules.len(), 1);
+        assert_eq!(op.rules[0].domain, "prod.google.com");
+        assert_eq!(op.rules[0].role, "pa-3b327f803b");
         assert!(policy.oak_reference_values.is_some());
     }
 

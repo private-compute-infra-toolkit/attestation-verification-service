@@ -14,8 +14,9 @@
 
 use avs_proto_rust::avs::Policy;
 
+use crate::certs::extract_spki_from_pem;
 #[cfg(not(test))]
-use crate::certs::{extract_spki_from_pem, load_certificates};
+use crate::certs::load_certificates;
 
 use oak_proto_rust::oak::attestation::v1::{
     binary_reference_value, kernel_binary_reference_value, mpm_reference_value, reference_values,
@@ -31,13 +32,15 @@ fn load_rsa_sha2_256_keyset(certs: &[String]) -> anyhow::Result<Option<Verifying
     }
 
     let mut keys = Vec::new();
-    for (index, pem_content) in certs.iter().enumerate() {
-        let raw_key = extract_spki_from_pem(pem_content)?;
-        keys.push(VerifyingKey {
-            r#type: KeyType::RsaSha2256 as i32,
-            key_id: index as u32,
-            raw: raw_key,
-        });
+    for pem_content in certs {
+        for raw_key in extract_spki_from_pem(pem_content)? {
+            keys.push(VerifyingKey {
+                r#type: KeyType::RsaSha2256 as i32,
+                raw: raw_key,
+                // key_id is not set because pes_endorsement does not define it
+                ..Default::default()
+            });
+        }
     }
 
     Ok(Some(VerifyingKeySet { keys, signed_timestamp: None }))
@@ -211,15 +214,11 @@ mod mocks {
             if let Some(ref certs) = *cell.borrow() {
                 Ok(certs.clone())
             } else if glob_pattern == "etc/pes-certs/**/*.pem" {
-                Ok(vec!["mock_cert_foo".to_string(), "mock_cert_bar".to_string()])
+                Ok(vec![crate::certs::tests::CERTS_PEM.to_string()])
             } else {
                 Ok(Vec::new())
             }
         })
-    }
-
-    pub fn extract_spki_from_pem(pem: &str) -> anyhow::Result<Vec<u8>> {
-        Ok(format!("spki_of_{}", pem).into_bytes())
     }
 }
 
@@ -430,28 +429,31 @@ mod tests {
     }
 
     #[test]
-    fn test_load_rsa_sha2_256_keyset_valid() {
-        let certs = vec!["cert_foo".to_string(), "cert_bar".to_string()];
-        let key_set = load_rsa_sha2_256_keyset(&certs).unwrap().unwrap();
+    fn test_load_rsa_sha2_256_keyset_multiple_certs() {
+        let mut endorsement_data =
+            test_util::endorsement_data::EndorsementData::load_for_pes_verification();
+        let key_set = load_rsa_sha2_256_keyset(&[crate::certs::tests::CERTS_PEM.to_string()])
+            .unwrap()
+            .unwrap();
 
-        assert_eq!(key_set.keys.len(), 2);
-        assert_eq!(key_set.keys[0].r#type, KeyType::RsaSha2256 as i32);
-        assert_eq!(key_set.keys[0].key_id, 0);
-        assert_eq!(key_set.keys[0].raw, b"spki_of_cert_foo");
-
-        assert_eq!(key_set.keys[1].r#type, KeyType::RsaSha2256 as i32);
-        assert_eq!(key_set.keys[1].key_id, 1);
-        assert_eq!(key_set.keys[1].raw, b"spki_of_cert_bar");
-
-        assert!(key_set.signed_timestamp.is_none());
+        endorsement_data.ref_value.tlog.as_mut().unwrap().pes.as_mut().unwrap().key_set =
+            Some(key_set);
+        oak_attestation_verification::verify_endorsement(
+            endorsement_data.make_valid_time().into_unix_millis(),
+            &endorsement_data.signed_endorsement,
+            &endorsement_data.ref_value,
+        )
+        .expect(
+            "PES endorsement verification should succeed with multiple certs and default key_id",
+        );
     }
 
     #[test]
     fn test_inject_pes_keys_success() {
         use oak_proto_rust::oak::attestation::v1::{
             AmdSevReferenceValues, BinaryReferenceValue, CbTransparentReferenceValues,
-            EndorsementReferenceValue, KeyType, PesReferenceValue, ReferenceValues,
-            RootLayerReferenceValues, TLogReferenceValues, VerifyingKey, VerifyingKeySet,
+            EndorsementReferenceValue, PesReferenceValue, ReferenceValues,
+            RootLayerReferenceValues, TLogReferenceValues,
         };
 
         // 1. Construct the initial Policy with one of the layers populated
@@ -475,21 +477,10 @@ mod tests {
         inject_pes_keys(&mut policy).expect("failed to inject keys");
 
         // 3. Construct the expected Policy object (with the key set injected)
-        let expected_key_set = VerifyingKeySet {
-            keys: vec![
-                VerifyingKey {
-                    r#type: KeyType::RsaSha2256 as i32,
-                    key_id: 0,
-                    raw: b"spki_of_mock_cert_foo".to_vec(),
-                },
-                VerifyingKey {
-                    r#type: KeyType::RsaSha2256 as i32,
-                    key_id: 1,
-                    raw: b"spki_of_mock_cert_bar".to_vec(),
-                },
-            ],
-            signed_timestamp: None,
-        };
+        let expected_key_set =
+            load_rsa_sha2_256_keyset(&[crate::certs::tests::CERTS_PEM.to_string()])
+                .unwrap()
+                .unwrap();
 
         let expected_policy = Policy {
             oak_reference_values: Some(ReferenceValues {
@@ -502,6 +493,7 @@ mod tests {
                                         tlog: Some(TLogReferenceValues {
                                             pes: Some(PesReferenceValue {
                                                 key_set: Some(expected_key_set),
+                                                ..Default::default()
                                             }),
                                             ..Default::default()
                                         }),
