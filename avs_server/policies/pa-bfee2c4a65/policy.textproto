@@ -18,7 +18,7 @@
 # Policy for the pa-bfee2c4a65 workload.
 
 publisher_domain: "google.com"
-publisher_role: "pcit-release-bot"
+publisher_role: "paic-release-bot"
 workload_name: "pa-bfee2c4a65"
 name: "pa-bfee2c4a65"
 operator_policy {

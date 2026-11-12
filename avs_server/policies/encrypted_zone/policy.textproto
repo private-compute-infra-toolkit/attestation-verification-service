@@ -19,7 +19,7 @@
 # EZ_TSM_CB_FRONTEND_CERTIFICATE PolicyHints share this same policy.
 
 publisher_domain: "google.com"
-publisher_role: "pcit-release-bot"
+publisher_role: "paic-release-bot"
 workload_name: "encrypted-zone"
 name: "encrypted_zone"
 operator_policy {

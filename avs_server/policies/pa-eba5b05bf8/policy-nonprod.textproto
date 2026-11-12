@@ -18,7 +18,7 @@
 # Nonprod Policy for the pa-eba5b05bf8 workload.
 
 publisher_domain: "google.com"
-publisher_role: "pcit-release-bot"
+publisher_role: "paic-release-bot"
 workload_name: "pa-eba5b05bf8-nonprod"
 name: "pa-eba5b05bf8-nonprod"
 operator_policy {

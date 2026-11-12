@@ -18,7 +18,7 @@
 # Policy for the pa-014c68966d workload.
 
 publisher_domain: "google.com"
-publisher_role: "pcit-release-bot"
+publisher_role: "paic-release-bot"
 workload_name: "pa-014c68966d"
 name: "pa-014c68966d"
 operator_policy {

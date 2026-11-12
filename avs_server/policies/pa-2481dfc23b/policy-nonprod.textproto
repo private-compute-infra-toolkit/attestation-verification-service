@@ -18,7 +18,7 @@
 # Nonprod Policy for the pa-2481dfc23b workload.
 
 publisher_domain: "google.com"
-publisher_role: "pcit-release-bot"
+publisher_role: "paic-release-bot"
 workload_name: "pa-2481dfc23b-nonprod"
 name: "pa-2481dfc23b-nonprod"
 operator_policy {

@@ -20,7 +20,7 @@
 # share this same policy.
 
 publisher_domain: "google.com"
-publisher_role: "pcit-release-bot"
+publisher_role: "paic-release-bot"
 workload_name: "pa-frontend-nonprod"
 name: "pa-frontend-nonprod"
 operator_policy {
