@@ -17,7 +17,9 @@
 use std::{sync::Arc, time::Duration};
 
 use crate::{
-    ca::KeyPair, layer2_policy::AvsLayer2Policy, layer2_shadow::Layer2ShadowContext,
+    ca::{KeyPair, NOT_BEFORE_DELAY_SEC},
+    layer2_policy::AvsLayer2Policy,
+    layer2_shadow::Layer2ShadowContext,
     operator_info::OperatorInfo,
 };
 use anyhow::Context;
@@ -255,15 +257,18 @@ fn verify_oak_containers_user_data(
 }
 
 /// Extracts the validity period by intersecting the endorsement validity
-/// windows returned across all event attestation results. If no endorsement
-/// validity windows are present, falls back to `fallback_duration`.
+/// windows returned across all event attestation results. `not_before` starts
+/// at `current_time_sec - NOT_BEFORE_DELAY_SEC` (to mitigate clock drift) and
+/// is clamped so it never precedes any endorsement's `not_before`. If no
+/// endorsement validity windows are present, `not_after` falls back to
+/// `not_before + fallback_duration`.
 fn extract_validity_with_fallback(
     attestation_results: &AttestationResults,
     current_time_sec: i64,
     fallback_duration: Duration,
 ) -> anyhow::Result<(i64, i64)> {
-    let mut not_before_sec = current_time_sec;
-    let mut not_after_sec = current_time_sec + (fallback_duration.as_secs() as i64);
+    let mut not_before_sec = current_time_sec - NOT_BEFORE_DELAY_SEC;
+    let mut not_after_sec = not_before_sec + (fallback_duration.as_secs() as i64);
 
     for event_attestation_result in &attestation_results.event_attestation_results {
         if let Some(validity) = get_validity(event_attestation_result) {
@@ -537,8 +542,8 @@ mod tests {
         let now = 1_000_000;
         let fallback = Duration::from_secs(500_000);
         let (nb, na) = extract_validity_with_fallback(&attestation_results, now, fallback).unwrap();
-        assert_eq!(nb, now);
-        assert_eq!(na, now + 500_000);
+        assert_eq!(nb, now - NOT_BEFORE_DELAY_SEC);
+        assert_eq!(na, nb + 500_000);
     }
 
     #[test]
@@ -556,7 +561,27 @@ mod tests {
         let now = 1_000_000;
         let fallback = Duration::from_secs(5_000_000);
         let (nb, na) = extract_validity_with_fallback(&attestation_results, now, fallback).unwrap();
-        assert_eq!(nb, now);
+        assert_eq!(nb, now - NOT_BEFORE_DELAY_SEC);
+        assert_eq!(na, 2_000_000);
+    }
+
+    #[test]
+    fn extract_validity_with_fallback_clamps_not_before_to_endorsement_window() {
+        let now = 1_000_000;
+        let endorsement_not_before = now - 100;
+        let attestation_results = AttestationResults {
+            event_attestation_results: vec![EventAttestationResults {
+                valid: Some(Validity {
+                    not_before: Some(make_timestamp(endorsement_not_before)),
+                    not_after: Some(make_timestamp(2_000_000)),
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let fallback = Duration::from_secs(5_000_000);
+        let (nb, na) = extract_validity_with_fallback(&attestation_results, now, fallback).unwrap();
+        assert_eq!(nb, endorsement_not_before);
         assert_eq!(na, 2_000_000);
     }
 

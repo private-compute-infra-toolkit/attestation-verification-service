@@ -365,11 +365,19 @@ fn validate_cert_chain(
     let not_before: chrono::DateTime<Utc> = not_before_sys.into();
     let not_after_sys = tbs.validity.not_after.to_system_time();
     let not_after: chrono::DateTime<Utc> = not_after_sys.into();
-    assert!(now >= not_before - Duration::seconds(60));
-    let expected_not_after = now + Duration::days(90);
-    let delta = expected_not_after - not_after;
+    let expected_not_before = now - Duration::seconds(300);
+    let delta_not_before = expected_not_before - not_before;
     assert!(
-        delta.num_seconds().abs() < 120,
+        delta_not_before.num_seconds().abs() < 120,
+        "not_before is not within the expected range: now={}, not_before={}, expected={}",
+        now,
+        not_before,
+        expected_not_before
+    );
+    let expected_not_after = expected_not_before + Duration::days(90);
+    let delta_not_after = expected_not_after - not_after;
+    assert!(
+        delta_not_after.num_seconds().abs() < 120,
         "not_after is not within the expected range: now={}, not_after={}, expected={}",
         now,
         not_after,

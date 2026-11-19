@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 1.8.0 (2026-11-19)
+
+
+### Dependencies
+
+* **deps:** Update PES root certificates (diff hash: de02dbca)
+* **deps:** Update policies (diff hash: 30f702b4)
+* **deps:** Update policies (diff hash: 664b530e)
+* **deps:** Update policies (diff hash: 743dd3e7)
+* **deps:** Update tlog policies (diff hash: 962675f8)
+
+
+### Features
+
+* add 5-minute notBefore delay for AVS certificates
+* **policies:** add prod encrypted_zone layer-2 shadow candidate
+* **policies:** add prod pa-3b327f803b layer-2 shadow candidate
+* **policies:** add staging prober_ez layer-2 shadow candidate
+* **policies:** enforce strict layer 2 for prober
+
 ## 1.7.0 (2026-11-12)
 
 

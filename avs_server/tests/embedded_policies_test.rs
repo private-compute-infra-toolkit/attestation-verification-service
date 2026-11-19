@@ -21,6 +21,11 @@ use avs_server_lib::{
 };
 use oak_proto_rust::oak::attestation::v1::reference_values;
 
+/// Policies that enforce strict one-to-one layer-2 matching. All other policies
+/// use permissive matching (and may evaluate a strict candidate in shadow
+/// mode).
+const STRICT_LAYER2_POLICIES: &[&str] = &["prober"];
+
 #[test]
 #[allow(deprecated)]
 fn test_all_embedded_policies_f5_requirements() {
@@ -66,11 +71,15 @@ fn test_all_embedded_policies_f5_requirements() {
             verifier_res.err()
         );
 
-        // 2. enforce_strict_layer2 == false for every policy
-        assert!(
-            !policy.enforce_strict_layer2,
-            "policy '{}' has enforce_strict_layer2 = true, must default to false",
-            name
+        // 2. enforce_strict_layer2 is true exactly for the policies that have
+        //    been moved to strict layer-2 matching.
+        assert_eq!(
+            policy.enforce_strict_layer2,
+            STRICT_LAYER2_POLICIES.contains(&name.as_str()),
+            "policy '{}' has unexpected enforce_strict_layer2 = {}; update \
+             STRICT_LAYER2_POLICIES when enabling strict layer-2 matching",
+            name,
+            policy.enforce_strict_layer2
         );
 
         // 3. Every non-"development" CBT policy has non-empty

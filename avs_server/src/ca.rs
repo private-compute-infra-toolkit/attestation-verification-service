@@ -22,6 +22,9 @@ use tca_common::TcaClient;
 
 const CERT_VALIDITY: i64 = 365;
 const SEC_DAYS: i64 = 24 * 60 * 60;
+// Five minutes (300 seconds) delay applied to `notBefore` to mitigate clock
+// drift.
+pub(crate) const NOT_BEFORE_DELAY_SEC: i64 = 5 * 60;
 const ISSUER_NAME: &str = "Attestation Verification Service";
 
 // Trust domain for the SPIFFE identity in self-signed mode (no TCA).
@@ -462,7 +465,7 @@ impl CertificateAuthority {
     fn set_x509_validity(x509: *mut bssl_sys::X509, days: i64) -> anyhow::Result<()> {
         unsafe {
             let not_before = bssl_sys::X509_getm_notBefore(x509);
-            if bssl_sys::X509_gmtime_adj(not_before, 0).is_null() {
+            if bssl_sys::X509_gmtime_adj(not_before, -NOT_BEFORE_DELAY_SEC).is_null() {
                 anyhow::bail!("Failed to set notBefore");
             }
             let not_after = bssl_sys::X509_getm_notAfter(x509);

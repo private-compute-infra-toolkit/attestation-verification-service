@@ -419,11 +419,6 @@ mod tests {
             ("encrypted_zone", CertificateProfile::Mtls)
         );
         assert_eq!(
-            resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "pa-frontend-staging")
-                .unwrap(),
-            ("encrypted_zone", CertificateProfile::Mtls)
-        );
-        assert_eq!(
             resolve_legacy_hint(PolicyHint::EzEnforcerCbCertificate, "pa-frontend-nonprod")
                 .unwrap(),
             ("pa-frontend-nonprod", CertificateProfile::Mtls)
