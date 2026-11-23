@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::SystemTime;
+
 use anyhow::Context;
 use glob::glob;
 use x509_cert::der::Encode;
 use x509_cert::Certificate;
 
 /// Extracts the SubjectPublicKeyInfo (SPKI) DER-encoded bytes for every
-/// certificate present in a PEM-encoded certificate string, in order.
-pub fn extract_spki_from_pem(pem: &str) -> anyhow::Result<Vec<Vec<u8>>> {
+/// certificate in `pem` whose validity window contains `now`, in order.
+pub fn extract_spki_from_pem(pem: &str, now: SystemTime) -> anyhow::Result<Vec<Vec<u8>>> {
     let certs = Certificate::load_pem_chain(pem.as_bytes())
         .map_err(|e| anyhow::anyhow!("failed to parse PEM certificate chain: {e}"))?;
     if certs.is_empty() {
@@ -28,6 +30,11 @@ pub fn extract_spki_from_pem(pem: &str) -> anyhow::Result<Vec<Vec<u8>>> {
 
     certs
         .into_iter()
+        .filter(|cert| {
+            let validity = &cert.tbs_certificate.validity;
+            (validity.not_before.to_system_time()..=validity.not_after.to_system_time())
+                .contains(&now)
+        })
         .map(|cert| {
             cert.tbs_certificate
                 .subject_public_key_info
@@ -96,7 +103,7 @@ qrrlbUI=
 
     /// The PES root certificate that signed Oak's test endorsement
     /// (`@oak//oak_attestation_verification/testdata/pes/pes_root_cert.der`).
-    const ENDORSEMENT_PES_CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+    pub(crate) const ENDORSEMENT_PES_CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
 MIIFyDCCA7CgAwIBAgIUEdDuFIM/751WQkiQ/hO4dgc+NDkwDQYJKoZIhvcNAQEL
 BQAwMDELMAkGA1UEBhMCVVMxEzARBgNVBAoMCkdvb2dsZSBMTEMxDDAKBgNVBAMM
 A1BFUzAeFw0yNjA2MDkwOTA0NTlaFw0yNjEwMDgwOTA0NTlaMDAxCzAJBgNVBAYT
@@ -214,27 +221,52 @@ Y0J4mhasgUu1HqwtkthUSDd9+hzadngjSgmQGyESFa8Rb8VfWhTQGed40Ko=
         0xef, 0xaa, 0x95, 0x82, 0xf7, 0x02, 0x03, 0x01, 0x00, 0x01,
     ];
 
-    const CERTS_SPKIS: &[&[u8]] = &[UNRELATED_PES_CERT_SPKI, ENDORSEMENT_PES_CERT_SPKI];
+    pub(crate) fn cert_validity(pem: &str) -> (SystemTime, SystemTime) {
+        use x509_cert::der::DecodePem;
+        let cert = Certificate::from_pem(pem).unwrap();
+        let validity = cert.tbs_certificate.validity;
+        (validity.not_before.to_system_time(), validity.not_after.to_system_time())
+    }
 
     #[test]
-    fn test_extract_multiple_spkis_from_pem() {
-        let result = extract_spki_from_pem(&CERTS_PEM).expect("failed to extract multiple SPKIs");
-        assert_eq!(result, CERTS_SPKIS);
+    fn test_extract_spki_from_pem_validity() {
+        let one_sec = std::time::Duration::from_secs(1);
+        let (u_start, u_end) = cert_validity(UNRELATED_PES_CERT_PEM);
+        let (e_start, e_end) = cert_validity(ENDORSEMENT_PES_CERT_PEM);
+
+        let cases: &[(SystemTime, &[&[u8]])] = &[
+            (u_start - one_sec, &[]),
+            (u_start, &[UNRELATED_PES_CERT_SPKI]),
+            (e_start, &[UNRELATED_PES_CERT_SPKI, ENDORSEMENT_PES_CERT_SPKI]),
+            (u_end + one_sec, &[ENDORSEMENT_PES_CERT_SPKI]),
+            (e_end, &[ENDORSEMENT_PES_CERT_SPKI]),
+            (e_end + one_sec, &[]),
+        ];
+
+        for &(now, expected) in cases {
+            let actual = extract_spki_from_pem(&CERTS_PEM, now).unwrap();
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
     fn test_extract_spki_from_pem_empty_and_invalid() {
-        assert!(extract_spki_from_pem("").is_err());
-        assert!(extract_spki_from_pem("   \n  ").is_err());
-        assert!(extract_spki_from_pem("not a valid pem").is_err());
+        let now = SystemTime::UNIX_EPOCH;
+        assert!(extract_spki_from_pem("", now).is_err());
+        assert!(extract_spki_from_pem("   \n  ", now).is_err());
+        assert!(extract_spki_from_pem("not a valid pem", now).is_err());
         assert!(extract_spki_from_pem(
-            "-----BEGIN CERTIFICATE-----\nmalformed\n-----END CERTIFICATE-----"
+            "-----BEGIN CERTIFICATE-----\nmalformed\n-----END CERTIFICATE-----",
+            now,
         )
         .is_err());
-        assert!(extract_spki_from_pem(&format!(
-            "{}\n-----BEGIN CERTIFICATE-----\nmalformed\n-----END CERTIFICATE-----",
-            *CERTS_PEM
-        ))
+        assert!(extract_spki_from_pem(
+            &format!(
+                "{}\n-----BEGIN CERTIFICATE-----\nmalformed\n-----END CERTIFICATE-----",
+                *CERTS_PEM
+            ),
+            now,
+        )
         .is_err());
     }
 

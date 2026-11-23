@@ -65,6 +65,14 @@ oak_reference_values {
         }
       }
       intel_tdx {
+        tee_tcb_svn {
+          skip {
+          }
+        }
+        stage0 {
+          skip {
+          }
+        }
       }
       insecure {
       }

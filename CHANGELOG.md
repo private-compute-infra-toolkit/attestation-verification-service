@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## 1.9.0 (2026-11-23)
+
+
+### Dependencies
+
+* **deps:** Update PES root certificates (diff hash: 326d7074)
+* **deps:** Update policies (diff hash: ac02b356)
+
+
+### Features
+
+* **policies:** enforce strict layer 2 for Private Agency nonprod
+* **policies:** Ignore out-of-validity PES certs
+
+
+### Bug Fixes
+
+* **policies:** inject t-log keys into shadow layer-2 candidates
+
 ## 1.8.0 (2026-11-19)
 
 

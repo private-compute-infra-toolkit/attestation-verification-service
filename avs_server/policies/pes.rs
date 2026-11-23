@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::SystemTime;
+
 use avs_proto_rust::avs::Policy;
 
 use crate::certs::extract_spki_from_pem;
@@ -25,15 +27,18 @@ use oak_proto_rust::oak::attestation::v1::{
     VerifyingKeySet,
 };
 
-/// Loads a single `VerifyingKeySet` from the provided certificate strings.
-fn load_rsa_sha2_256_keyset(certs: &[String]) -> anyhow::Result<Option<VerifyingKeySet>> {
+/// Loads a single `VerifyingKeySet` from the certificates valid at `now`.
+fn load_rsa_sha2_256_keyset(
+    certs: &[String],
+    now: SystemTime,
+) -> anyhow::Result<Option<VerifyingKeySet>> {
     if certs.is_empty() {
         return Ok(None);
     }
 
     let mut keys = Vec::new();
     for pem_content in certs {
-        for raw_key in extract_spki_from_pem(pem_content)? {
+        for raw_key in extract_spki_from_pem(pem_content, now)? {
             keys.push(VerifyingKey {
                 r#type: KeyType::RsaSha2256 as i32,
                 raw: raw_key,
@@ -171,28 +176,37 @@ fn get_pes_fields_from_oak_containers(
 /// Returns a list of mutable references to all present `pes` fields in the
 /// given `Policy`.
 fn get_pes_fields(policy: &mut Policy) -> Vec<&mut PesReferenceValue> {
-    let Some(ref mut oak_ref_values) = policy.oak_reference_values else {
-        return Vec::new();
-    };
+    let oak_reference_values = &mut policy.oak_reference_values;
+    let shadow = &mut policy.shadow;
 
-    match oak_ref_values.r#type {
-        Some(reference_values::Type::Cbt(ref mut cbt_reference_values)) => {
+    let mut fields = match oak_reference_values.as_mut().and_then(|rv| rv.r#type.as_mut()) {
+        Some(reference_values::Type::Cbt(cbt_reference_values)) => {
             get_pes_fields_from_cbt(cbt_reference_values)
         }
-        Some(reference_values::Type::OakContainers(ref mut oc_reference_values)) => {
+        Some(reference_values::Type::OakContainers(oc_reference_values)) => {
             get_pes_fields_from_oak_containers(oc_reference_values)
         }
         _ => Vec::new(),
+    };
+
+    // The shadow layer-2 candidate is verified with the same t-log checks as
+    // the main reference values, so it needs the same injected values.
+    if let Some(layer2) = shadow.as_mut().and_then(|s| s.layer2.as_mut()) {
+        for mpm in &mut layer2.binary_mpms {
+            fields.extend(get_pes_from_single_mpm_reference_value(mpm));
+        }
     }
+
+    fields
 }
 
-/// Loads the PES verifying keys from the glob pattern and injects them into the
-/// retrieved `pes` fields in the policy.
-pub fn inject_pes_keys(policy: &mut Policy) -> anyhow::Result<()> {
+/// Loads the PES verifying keys valid at `now` from the glob pattern and
+/// injects them into the retrieved `pes` fields in the policy.
+pub fn inject_pes_keys(policy: &mut Policy, now: SystemTime) -> anyhow::Result<()> {
     let glob_pattern = "etc/pes-certs/**/*.pem";
     let certs = load_certificates(glob_pattern)?;
 
-    if let Some(key_set) = load_rsa_sha2_256_keyset(&certs)? {
+    if let Some(key_set) = load_rsa_sha2_256_keyset(&certs, now)? {
         for pes_field in get_pes_fields(policy) {
             pes_field.key_set = Some(key_set.clone());
         }
@@ -424,28 +438,42 @@ mod tests {
 
     #[test]
     fn test_load_rsa_sha2_256_keyset_empty() {
-        let result = load_rsa_sha2_256_keyset(&[]).unwrap();
+        let result = load_rsa_sha2_256_keyset(&[], SystemTime::UNIX_EPOCH).unwrap();
         assert!(result.is_none());
     }
 
     #[test]
-    fn test_load_rsa_sha2_256_keyset_multiple_certs() {
-        let mut endorsement_data =
-            test_util::endorsement_data::EndorsementData::load_for_pes_verification();
-        let key_set = load_rsa_sha2_256_keyset(&[crate::certs::tests::CERTS_PEM.to_string()])
-            .unwrap()
-            .unwrap();
-
-        endorsement_data.ref_value.tlog.as_mut().unwrap().pes.as_mut().unwrap().key_set =
-            Some(key_set);
-        oak_attestation_verification::verify_endorsement(
-            endorsement_data.make_valid_time().into_unix_millis(),
-            &endorsement_data.signed_endorsement,
-            &endorsement_data.ref_value,
+    fn test_load_rsa_sha2_256_keyset_all_expired_returns_empty_keyset() {
+        let (_, e_end) =
+            crate::certs::tests::cert_validity(crate::certs::tests::ENDORSEMENT_PES_CERT_PEM);
+        let result = load_rsa_sha2_256_keyset(
+            &[crate::certs::tests::CERTS_PEM.to_string()],
+            e_end + std::time::Duration::from_secs(1),
         )
-        .expect(
-            "PES endorsement verification should succeed with multiple certs and default key_id",
-        );
+        .unwrap();
+        assert_eq!(result, Some(VerifyingKeySet::default()));
+    }
+
+    #[test]
+    fn test_load_rsa_sha2_256_keyset_multiple_certs() {
+        let (e_start, e_end) =
+            crate::certs::tests::cert_validity(crate::certs::tests::ENDORSEMENT_PES_CERT_PEM);
+        let certs = [crate::certs::tests::CERTS_PEM.to_string()];
+
+        for (now, should_verify) in
+            [(e_start, true), (e_end + std::time::Duration::from_secs(1), false)]
+        {
+            let mut endorsement_data =
+                test_util::endorsement_data::EndorsementData::load_for_pes_verification();
+            endorsement_data.ref_value.tlog.as_mut().unwrap().pes.as_mut().unwrap().key_set =
+                load_rsa_sha2_256_keyset(&certs, now).unwrap();
+            let result = oak_attestation_verification::verify_endorsement(
+                endorsement_data.make_valid_time().into_unix_millis(),
+                &endorsement_data.signed_endorsement,
+                &endorsement_data.ref_value,
+            );
+            assert_eq!(result.is_ok(), should_verify);
+        }
     }
 
     #[test]
@@ -455,6 +483,9 @@ mod tests {
             EndorsementReferenceValue, PesReferenceValue, ReferenceValues,
             RootLayerReferenceValues, TLogReferenceValues,
         };
+
+        let (valid_now, _) =
+            crate::certs::tests::cert_validity(crate::certs::tests::ENDORSEMENT_PES_CERT_PEM);
 
         // 1. Construct the initial Policy with one of the layers populated
         let mut policy = Policy {
@@ -474,11 +505,11 @@ mod tests {
         };
 
         // 2. Invoke the public API
-        inject_pes_keys(&mut policy).expect("failed to inject keys");
+        inject_pes_keys(&mut policy, valid_now).expect("failed to inject keys");
 
         // 3. Construct the expected Policy object (with the key set injected)
         let expected_key_set =
-            load_rsa_sha2_256_keyset(&[crate::certs::tests::CERTS_PEM.to_string()])
+            load_rsa_sha2_256_keyset(&[crate::certs::tests::CERTS_PEM.to_string()], valid_now)
                 .unwrap()
                 .unwrap();
 
@@ -553,10 +584,60 @@ mod tests {
         let initial_policy = policy.clone();
 
         // 2. Invoke the public API
-        inject_pes_keys(&mut policy).expect("failed to inject keys");
+        inject_pes_keys(&mut policy, SystemTime::UNIX_EPOCH).expect("failed to inject keys");
 
         // 3. Assert that the policy was not modified at all (matches the
         //    initial state exactly)
         assert_eq!(policy, initial_policy);
+    }
+
+    #[test]
+    fn test_inject_pes_keys_includes_shadow_layer2() {
+        use avs_proto_rust::avs::ShadowPolicy;
+        use oak_proto_rust::oak::attestation::v1::{
+            AmdSevReferenceValues, CbLayer2TransparentReferenceValues,
+            CbTransparentReferenceValues, ReferenceValues, RootLayerReferenceValues,
+        };
+
+        let (valid_now, _) =
+            crate::certs::tests::cert_validity(crate::certs::tests::ENDORSEMENT_PES_CERT_PEM);
+
+        // A policy with PES fields in both the main reference values and the
+        // shadow layer-2 candidate.
+        let mut policy = Policy {
+            oak_reference_values: Some(ReferenceValues {
+                r#type: Some(reference_values::Type::Cbt(CbTransparentReferenceValues {
+                    root_layer: Some(RootLayerReferenceValues {
+                        amd_sev: Some(AmdSevReferenceValues {
+                            stage0: Some(mock_binary_ref_value()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })),
+            }),
+            shadow: Some(ShadowPolicy {
+                layer2: Some(CbLayer2TransparentReferenceValues {
+                    binary_mpms: vec![mock_mpm_ref_value(), mock_mpm_ref_value()],
+                    ..Default::default()
+                }),
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(get_pes_fields(&mut policy).len(), 3);
+
+        inject_pes_keys(&mut policy, valid_now).expect("failed to inject keys");
+
+        let expected_key_set =
+            load_rsa_sha2_256_keyset(&[crate::certs::tests::CERTS_PEM.to_string()], valid_now)
+                .unwrap()
+                .unwrap();
+        let fields = get_pes_fields(&mut policy);
+        assert_eq!(fields.len(), 3);
+        for field in fields {
+            assert_eq!(field.key_set.as_ref(), Some(&expected_key_set));
+        }
     }
 }

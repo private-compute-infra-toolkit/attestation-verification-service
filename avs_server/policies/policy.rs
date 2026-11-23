@@ -88,7 +88,7 @@ pub fn get_policy_with_config_and_c2sp_policy(
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("unrecognized policy name: {}", name))?;
 
-    pes::inject_pes_keys(&mut policy)?;
+    pes::inject_pes_keys(&mut policy, std::time::SystemTime::now())?;
     if config.enable_c2sp_tlog {
         c2sp::inject_c2sp_policy(&mut policy, c2sp_policy)?;
     }

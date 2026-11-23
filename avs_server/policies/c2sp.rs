@@ -147,19 +147,28 @@ fn get_c2sp_fields_from_oak_containers(
 /// Returns a list of mutable references to all present `c2sp` fields in the
 /// given `Policy`.
 fn get_c2sp_fields(policy: &mut Policy) -> Vec<&mut C2sptLogProofReferenceValue> {
-    let Some(ref mut oak_ref_values) = policy.oak_reference_values else {
-        return Vec::new();
-    };
+    let oak_reference_values = &mut policy.oak_reference_values;
+    let shadow = &mut policy.shadow;
 
-    match oak_ref_values.r#type {
-        Some(reference_values::Type::Cbt(ref mut cbt_reference_values)) => {
+    let mut fields = match oak_reference_values.as_mut().and_then(|rv| rv.r#type.as_mut()) {
+        Some(reference_values::Type::Cbt(cbt_reference_values)) => {
             get_c2sp_fields_from_cbt(cbt_reference_values)
         }
-        Some(reference_values::Type::OakContainers(ref mut oc_reference_values)) => {
+        Some(reference_values::Type::OakContainers(oc_reference_values)) => {
             get_c2sp_fields_from_oak_containers(oc_reference_values)
         }
         _ => Vec::new(),
+    };
+
+    // The shadow layer-2 candidate is verified with the same t-log checks as
+    // the main reference values, so it needs the same injected values.
+    if let Some(layer2) = shadow.as_mut().and_then(|s| s.layer2.as_mut()) {
+        for mpm in &mut layer2.binary_mpms {
+            fields.extend(get_c2sp_from_single_mpm_reference_value(mpm));
+        }
     }
+
+    fields
 }
 
 /// Injects `c2sp_policy` into all `c2sp` fields in the policy.
@@ -463,5 +472,48 @@ mod tests {
 
         // Assert that the policy was not modified at all
         assert_eq!(policy, initial_policy);
+    }
+
+    #[test]
+    fn test_inject_c2sp_policy_includes_shadow_layer2() {
+        use avs_proto_rust::avs::ShadowPolicy;
+        use oak_proto_rust::oak::attestation::v1::{
+            AmdSevReferenceValues, CbLayer2TransparentReferenceValues,
+            CbTransparentReferenceValues, ReferenceValues, RootLayerReferenceValues,
+        };
+
+        // A policy with C2SP fields in both the main reference values and the
+        // shadow layer-2 candidate.
+        let mut policy = Policy {
+            oak_reference_values: Some(ReferenceValues {
+                r#type: Some(reference_values::Type::Cbt(CbTransparentReferenceValues {
+                    root_layer: Some(RootLayerReferenceValues {
+                        amd_sev: Some(AmdSevReferenceValues {
+                            stage0: Some(mock_binary_ref_value()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })),
+            }),
+            shadow: Some(ShadowPolicy {
+                layer2: Some(CbLayer2TransparentReferenceValues {
+                    binary_mpms: vec![mock_mpm_ref_value(), mock_mpm_ref_value()],
+                    ..Default::default()
+                }),
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(get_c2sp_fields(&mut policy).len(), 3);
+
+        inject_c2sp_policy(&mut policy, TEST_C2SP_POLICY).expect("failed to inject c2sp policy");
+
+        let fields = get_c2sp_fields(&mut policy);
+        assert_eq!(fields.len(), 3);
+        for field in fields {
+            assert_eq!(field.policy, TEST_C2SP_POLICY);
+        }
     }
 }

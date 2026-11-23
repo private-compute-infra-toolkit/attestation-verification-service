@@ -24,7 +24,8 @@ use oak_proto_rust::oak::attestation::v1::reference_values;
 /// Policies that enforce strict one-to-one layer-2 matching. All other policies
 /// use permissive matching (and may evaluate a strict candidate in shadow
 /// mode).
-const STRICT_LAYER2_POLICIES: &[&str] = &["prober"];
+const STRICT_LAYER2_POLICIES: &[&str] =
+    &["prober", "pa-2481dfc23b-nonprod", "pa-eba5b05bf8-nonprod"];
 
 #[test]
 #[allow(deprecated)]

@@ -21,6 +21,9 @@ publisher_domain: "google.com"
 publisher_role: "paic-release-bot"
 workload_name: "pa-eba5b05bf8-nonprod"
 name: "pa-eba5b05bf8-nonprod"
+# The workload MPM and the tech envelope each match their own layer-2 slot,
+# so enforce strict one-to-one layer-2 matching.
+enforce_strict_layer2: true
 operator_policy {
   rules {
     domain: "prod.google.com"
